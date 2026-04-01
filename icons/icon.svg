@@ -1,0 +1,36 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="256" y1="32" x2="256" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#183F61"/>
+      <stop offset="0.42" stop-color="#11171D"/>
+      <stop offset="1" stop-color="#0B1015"/>
+    </linearGradient>
+    <linearGradient id="line" x1="111" y1="323" x2="388" y2="148" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6BB6FF"/>
+      <stop offset="1" stop-color="#1D9BF0"/>
+    </linearGradient>
+    <filter id="shadow" x="49" y="74" width="414" height="319" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="18"/>
+      <feGaussianBlur stdDeviation="16"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0.0705882 0 0 0 0 0.113725 0 0 0 0.5 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_2"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_2" result="shape"/>
+    </filter>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#bg)"/>
+  <rect x="80" y="80" width="352" height="352" rx="84" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)"/>
+  <path d="M128 324H384" stroke="rgba(247,249,249,0.18)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M128 258H384" stroke="rgba(247,249,249,0.12)" stroke-width="8" stroke-linecap="round" stroke-dasharray="10 16"/>
+  <path d="M128 192H384" stroke="rgba(247,249,249,0.08)" stroke-width="8" stroke-linecap="round" stroke-dasharray="10 16"/>
+  <g filter="url(#shadow)">
+    <path d="M112 325C160 325 196 325 238 325C276 325 302 325 334 289C356 264 366 220 388 149" stroke="url(#line)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <circle cx="112" cy="325" r="18" fill="#0F1419" stroke="#9FD4FF" stroke-width="10"/>
+  <circle cx="184" cy="325" r="18" fill="#0F1419" stroke="#9FD4FF" stroke-width="10"/>
+  <circle cx="256" cy="325" r="18" fill="#0F1419" stroke="#9FD4FF" stroke-width="10"/>
+  <circle cx="322" cy="301" r="18" fill="#0F1419" stroke="#9FD4FF" stroke-width="10"/>
+  <circle cx="388" cy="149" r="18" fill="#0F1419" stroke="#9FD4FF" stroke-width="10"/>
+</svg>
