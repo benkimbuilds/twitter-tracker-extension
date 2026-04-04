@@ -21,6 +21,66 @@ body {
   color: #8b98a5;
 }
 
+.site-picker {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.site-picker-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b98a5;
+}
+
+.site-picker-control {
+  position: relative;
+}
+
+.site-picker-control::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid rgba(247, 249, 249, 0.82);
+  border-bottom: 2px solid rgba(247, 249, 249, 0.82);
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+#siteSelect {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 12px 42px 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f7f9f9;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+#siteSelect:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#siteSelect:focus {
+  outline: none;
+  border-color: rgba(29, 155, 240, 0.72);
+  box-shadow: 0 0 0 1px rgba(29, 155, 240, 0.38);
+}
+
 .hero,
 .chart-card {
   border: 1px solid rgba(255, 255, 255, 0.08);

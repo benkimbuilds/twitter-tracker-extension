@@ -1,6 +1,33 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
+const POPUP_SITE_KEY = "twitterTrackerPopupSite";
 const CHART_DAYS = 14;
 const SVG_NS = "http://www.w3.org/2000/svg";
+const DEFAULT_SITE_ID = "twitter";
+const TRACKED_SITES = {
+  linkedin: {
+    label: "LinkedIn",
+    domains: ["linkedin.com"]
+  },
+  youtube: {
+    label: "YouTube",
+    domains: ["youtube.com"]
+  },
+  twitter: {
+    label: "Twitter",
+    domains: ["x.com", "twitter.com"]
+  },
+  facebook: {
+    label: "Facebook",
+    domains: ["facebook.com"]
+  },
+  instagram: {
+    label: "Instagram",
+    domains: ["instagram.com"]
+  }
+};
+
+let currentSiteId = DEFAULT_SITE_ID;
+let cachedDailyCounts = {};
 
 function getTodayKey() {
   const now = new Date();
@@ -29,13 +56,105 @@ function formatLabel(dateKey) {
   });
 }
 
-function getChartData(dailyCounts) {
+function matchesDomain(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function getTrackedSiteIdFromUrl(url) {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    return (
+      Object.entries(TRACKED_SITES).find(([, site]) =>
+        site.domains.some((domain) => matchesDomain(parsedUrl.hostname, domain))
+      )?.[0] ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function emptyDayEntry() {
+  return {
+    total: 0,
+    sites: {}
+  };
+}
+
+function normalizeDayEntry(entry) {
+  if (typeof entry === "number") {
+    return {
+      total: entry,
+      sites: entry > 0 ? { twitter: entry } : {}
+    };
+  }
+
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return emptyDayEntry();
+  }
+
+  const sites =
+    entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
+      ? Object.fromEntries(
+          Object.entries(entry.sites)
+            .filter(([siteId, count]) => siteId in TRACKED_SITES && Number.isFinite(count) && count > 0)
+            .map(([siteId, count]) => [siteId, count])
+        )
+      : {};
+  const derivedTotal = Object.values(sites).reduce((sum, count) => sum + count, 0);
+  const total = Number.isFinite(entry.total) && entry.total >= derivedTotal ? entry.total : derivedTotal;
+
+  return {
+    total,
+    sites
+  };
+}
+
+function normalizeDailyCounts(dailyCounts) {
+  if (!dailyCounts || typeof dailyCounts !== "object" || Array.isArray(dailyCounts)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
+  );
+}
+
+function getSiteCountForDate(dailyCounts, dateKey, siteId) {
+  return normalizeDayEntry(dailyCounts[dateKey]).sites[siteId] ?? 0;
+}
+
+function setSiteCountForDate(dailyCounts, dateKey, siteId, nextCount) {
+  const dayEntry = normalizeDayEntry(dailyCounts[dateKey]);
+  const previousCount = dayEntry.sites[siteId] ?? 0;
+  const safeCount = Math.max(0, Math.round(nextCount));
+
+  if (safeCount > 0) {
+    dayEntry.sites[siteId] = safeCount;
+  } else {
+    delete dayEntry.sites[siteId];
+  }
+
+  dayEntry.total = Math.max(0, dayEntry.total - previousCount + safeCount);
+
+  if (dayEntry.total === 0 && Object.keys(dayEntry.sites).length === 0) {
+    delete dailyCounts[dateKey];
+    return;
+  }
+
+  dailyCounts[dateKey] = dayEntry;
+}
+
+function getChartData(dailyCounts, siteId) {
   return Array.from({ length: CHART_DAYS }, (_, index) => {
     const offset = index - (CHART_DAYS - 1);
     const dateKey = getDateKeyForOffset(offset);
     return {
       dateKey,
-      count: dailyCounts[dateKey] ?? 0
+      count: getSiteCountForDate(dailyCounts, dateKey, siteId)
     };
   });
 }
@@ -57,9 +176,9 @@ function appendSvgElement(parent, tagName, attributes) {
   return element;
 }
 
-function renderChart(dailyCounts) {
+function renderChart(dailyCounts, siteId) {
   const chart = clearChart();
-  const data = getChartData(dailyCounts);
+  const data = getChartData(dailyCounts, siteId);
   const values = data.map((entry) => entry.count);
   const maxValue = Math.max(...values, 1);
   const width = 320;
@@ -134,42 +253,95 @@ function renderChart(dailyCounts) {
 
 async function getDailyCounts() {
   const stored = await chrome.storage.local.get(DAILY_COUNTS_KEY);
-  const dailyCounts = stored[DAILY_COUNTS_KEY];
-
-  if (!dailyCounts || typeof dailyCounts !== "object" || Array.isArray(dailyCounts)) {
-    return {};
-  }
-
-  return dailyCounts;
+  return normalizeDailyCounts(stored[DAILY_COUNTS_KEY]);
 }
 
-async function renderPopup() {
-  const dailyCounts = await getDailyCounts();
-  document.getElementById("todayCount").textContent = String(dailyCounts[getTodayKey()] ?? 0);
-  renderChart(dailyCounts);
+async function getDefaultSiteId() {
+  const requestedSiteId = new URLSearchParams(window.location.search).get("site");
+  if (requestedSiteId && requestedSiteId in TRACKED_SITES) {
+    return requestedSiteId;
+  }
+
+  try {
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true
+    });
+    const activeSiteId = getTrackedSiteIdFromUrl(activeTab?.url);
+    if (activeSiteId) {
+      return activeSiteId;
+    }
+  } catch {
+    // Ignore and fall back to stored preference.
+  }
+
+  const stored = await chrome.storage.local.get(POPUP_SITE_KEY);
+  if (stored[POPUP_SITE_KEY] && stored[POPUP_SITE_KEY] in TRACKED_SITES) {
+    return stored[POPUP_SITE_KEY];
+  }
+
+  return DEFAULT_SITE_ID;
+}
+
+function renderPopup() {
+  const site = TRACKED_SITES[currentSiteId];
+  document.getElementById("todayLabel").textContent = `${site.label} today`;
+  document.getElementById("todayCount").textContent = String(
+    getSiteCountForDate(cachedDailyCounts, getTodayKey(), currentSiteId)
+  );
+  document.getElementById("todayDescription").textContent =
+    `Opens on ${site.label}. Resets automatically when the local day changes.`;
+  document.getElementById("historyTitle").textContent = `Last 14 days on ${site.label}`;
+  document.getElementById("historyChart").setAttribute("aria-label", `Line chart of daily ${site.label} opens`);
+  renderChart(cachedDailyCounts, currentSiteId);
 }
 
 async function resetToday() {
-  const dailyCounts = await getDailyCounts();
-  dailyCounts[getTodayKey()] = 0;
-  await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: dailyCounts });
+  const nextDailyCounts = normalizeDailyCounts(cachedDailyCounts);
+  setSiteCountForDate(nextDailyCounts, getTodayKey(), currentSiteId, 0);
+  await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: nextDailyCounts });
 }
 
 async function clearHistory() {
-  await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: {} });
+  const nextDailyCounts = normalizeDailyCounts(cachedDailyCounts);
+  Object.keys(nextDailyCounts).forEach((dateKey) => {
+    setSiteCountForDate(nextDailyCounts, dateKey, currentSiteId, 0);
+  });
+  await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: nextDailyCounts });
 }
+
+async function initializePopup() {
+  cachedDailyCounts = await getDailyCounts();
+  currentSiteId = await getDefaultSiteId();
+  const siteSelect = document.getElementById("siteSelect");
+  siteSelect.value = currentSiteId;
+  renderPopup();
+}
+
+document.getElementById("siteSelect").addEventListener("change", async (event) => {
+  currentSiteId = event.target.value;
+  await chrome.storage.local.set({ [POPUP_SITE_KEY]: currentSiteId });
+  renderPopup();
+});
 
 document.getElementById("resetTodayButton").addEventListener("click", resetToday);
 document.getElementById("clearHistoryButton").addEventListener("click", clearHistory);
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local" || !changes[DAILY_COUNTS_KEY]) {
+  if (areaName !== "local") {
     return;
   }
 
-  const dailyCounts = changes[DAILY_COUNTS_KEY].newValue ?? {};
-  document.getElementById("todayCount").textContent = String(dailyCounts[getTodayKey()] ?? 0);
-  renderChart(dailyCounts);
+  if (changes[DAILY_COUNTS_KEY]) {
+    cachedDailyCounts = normalizeDailyCounts(changes[DAILY_COUNTS_KEY].newValue);
+  }
+
+  if (changes[POPUP_SITE_KEY] && changes[POPUP_SITE_KEY].newValue in TRACKED_SITES) {
+    currentSiteId = changes[POPUP_SITE_KEY].newValue;
+    document.getElementById("siteSelect").value = currentSiteId;
+  }
+
+  renderPopup();
 });
 
-renderPopup();
+initializePopup();

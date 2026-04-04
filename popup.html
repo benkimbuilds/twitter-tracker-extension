@@ -3,17 +3,29 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Twitter Open Tracker</title>
+    <title>Social Open Tracker</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <main class="popup">
-      <p class="eyebrow">Twitter Open Tracker</p>
+      <p class="eyebrow">Social Open Tracker</p>
+      <section class="site-picker">
+        <label class="site-picker-label" for="siteSelect">Website</label>
+        <div class="site-picker-control">
+          <select id="siteSelect">
+            <option value="linkedin">LinkedIn</option>
+            <option value="youtube">YouTube</option>
+            <option value="twitter">Twitter</option>
+            <option value="facebook">Facebook</option>
+            <option value="instagram">Instagram</option>
+          </select>
+        </div>
+      </section>
       <section class="hero">
         <div>
-          <p class="metric-label">Today</p>
+          <p id="todayLabel" class="metric-label">Twitter Today</p>
           <h1 id="todayCount">0</h1>
-          <p class="label">Resets automatically when the local day changes</p>
+          <p id="todayDescription" class="label">Opens on Twitter. Resets automatically when the local day changes.</p>
         </div>
         <button id="resetTodayButton" type="button">Reset today</button>
       </section>
@@ -22,9 +34,9 @@
         <div class="chart-header">
           <div>
             <p class="metric-label">History</p>
-            <h2 id="historyTitle">Last 14 days</h2>
+            <h2 id="historyTitle">Last 14 days on Twitter</h2>
           </div>
-          <button id="clearHistoryButton" class="secondary-button" type="button">Clear history</button>
+          <button id="clearHistoryButton" class="secondary-button" type="button">Clear site history</button>
         </div>
         <svg id="historyChart" viewBox="0 0 320 180" role="img" aria-label="Line chart of daily Twitter opens"></svg>
         <div class="chart-labels">

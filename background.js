@@ -1,16 +1,41 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const LEGACY_COUNT_KEY = "twitterOpenCount";
+const TRACKED_SITES = {
+  facebook: {
+    domains: ["facebook.com"]
+  },
+  instagram: {
+    domains: ["instagram.com"]
+  },
+  linkedin: {
+    domains: ["linkedin.com"]
+  },
+  twitter: {
+    domains: ["x.com", "twitter.com"]
+  },
+  youtube: {
+    domains: ["youtube.com"]
+  }
+};
 
-function isTwitterUrl(url) {
+function matchesDomain(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function getTrackedSiteId(url) {
   if (!url) {
-    return false;
+    return null;
   }
 
   try {
     const parsedUrl = new URL(url);
-    return parsedUrl.hostname === "x.com" || parsedUrl.hostname === "twitter.com";
+    return (
+      Object.entries(TRACKED_SITES).find(([, site]) =>
+        site.domains.some((domain) => matchesDomain(parsedUrl.hostname, domain))
+      )?.[0] ?? null
+    );
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -30,43 +55,89 @@ async function getDailyCounts() {
     return {};
   }
 
-  return dailyCounts;
+  return Object.fromEntries(
+    Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
+  );
 }
 
 async function setDailyCounts(dailyCounts) {
   await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: dailyCounts });
 }
 
+function normalizeDayEntry(entry) {
+  if (typeof entry === "number") {
+    return {
+      total: entry,
+      sites: entry > 0 ? { twitter: entry } : {}
+    };
+  }
+
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return {
+      total: 0,
+      sites: {}
+    };
+  }
+
+  const sites =
+    entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
+      ? Object.fromEntries(
+          Object.entries(entry.sites)
+            .filter(([siteId, count]) => siteId in TRACKED_SITES && Number.isFinite(count) && count > 0)
+            .map(([siteId, count]) => [siteId, count])
+        )
+      : {};
+  const derivedTotal = Object.values(sites).reduce((sum, count) => sum + count, 0);
+  const total = Number.isFinite(entry.total) && entry.total >= derivedTotal ? entry.total : derivedTotal;
+
+  return {
+    total,
+    sites
+  };
+}
+
 async function migrateLegacyCount() {
   const stored = await chrome.storage.local.get([DAILY_COUNTS_KEY, LEGACY_COUNT_KEY]);
   const legacyCount = stored[LEGACY_COUNT_KEY];
   const existingDailyCounts = stored[DAILY_COUNTS_KEY];
+  const normalizedDailyCounts =
+    existingDailyCounts && typeof existingDailyCounts === "object" && !Array.isArray(existingDailyCounts)
+      ? Object.fromEntries(
+          Object.entries(existingDailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
+        )
+      : {};
 
   if (typeof legacyCount !== "number") {
     if (!existingDailyCounts) {
       await setDailyCounts({});
+      return;
+    }
+
+    if (JSON.stringify(existingDailyCounts) !== JSON.stringify(normalizedDailyCounts)) {
+      await setDailyCounts(normalizedDailyCounts);
     }
     return;
   }
 
-  const dailyCounts =
-    existingDailyCounts && typeof existingDailyCounts === "object" && !Array.isArray(existingDailyCounts)
-      ? existingDailyCounts
-      : {};
-
   const todayKey = getTodayKey();
-  dailyCounts[todayKey] = (dailyCounts[todayKey] ?? 0) + legacyCount;
+  const todayEntry = normalizedDailyCounts[todayKey] ?? normalizeDayEntry();
+  todayEntry.total += legacyCount;
+  todayEntry.sites.twitter = (todayEntry.sites.twitter ?? 0) + legacyCount;
+  normalizedDailyCounts[todayKey] = todayEntry;
 
   await chrome.storage.local.set({
-    [DAILY_COUNTS_KEY]: dailyCounts
+    [DAILY_COUNTS_KEY]: normalizedDailyCounts
   });
   await chrome.storage.local.remove(LEGACY_COUNT_KEY);
 }
 
-async function incrementOpenCount() {
+async function incrementOpenCount(siteId) {
   const dailyCounts = await getDailyCounts();
   const todayKey = getTodayKey();
-  dailyCounts[todayKey] = (dailyCounts[todayKey] ?? 0) + 1;
+  const todayEntry = dailyCounts[todayKey] ?? normalizeDayEntry();
+  todayEntry.total += 1;
+  todayEntry.sites[siteId] = (todayEntry.sites[siteId] ?? 0) + 1;
+  dailyCounts[todayKey] = todayEntry;
   await setDailyCounts(dailyCounts);
 }
 
@@ -83,11 +154,13 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
     return;
   }
 
-  if (!isTwitterUrl(details.url)) {
+  const siteId = getTrackedSiteId(details.url);
+
+  if (!siteId) {
     return;
   }
 
-  await incrementOpenCount();
+  await incrementOpenCount(siteId);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -106,8 +179,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Fall through to the tab fallback when popup opening is unavailable.
     }
 
+    const popupUrl = new URL(chrome.runtime.getURL("popup.html"));
+    if (message.siteId && message.siteId in TRACKED_SITES) {
+      popupUrl.searchParams.set("site", message.siteId);
+    }
+
     await chrome.tabs.create({
-      url: chrome.runtime.getURL("popup.html")
+      url: popupUrl.toString()
     });
     sendResponse({ ok: true, mode: "tab" });
   })();

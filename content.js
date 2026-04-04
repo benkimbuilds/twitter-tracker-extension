@@ -1,7 +1,73 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const BADGE_POSITION_KEY = "twitterTrackerBadgePosition";
 const BADGE_ID = "twitter-open-tracker-badge";
+const TRACKED_SITES = {
+  facebook: {
+    domains: ["facebook.com"],
+    label: "Facebook"
+  },
+  instagram: {
+    domains: ["instagram.com"],
+    label: "Instagram"
+  },
+  linkedin: {
+    domains: ["linkedin.com"],
+    label: "LinkedIn"
+  },
+  twitter: {
+    domains: ["x.com", "twitter.com"],
+    label: "Twitter"
+  },
+  youtube: {
+    domains: ["youtube.com"],
+    label: "YouTube"
+  }
+};
 const DEFAULT_BADGE_POSITION = { top: 16, left: null, right: 16 };
+
+function matchesDomain(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function getCurrentSiteId() {
+  return (
+    Object.entries(TRACKED_SITES).find(([, site]) =>
+      site.domains.some((domain) => matchesDomain(window.location.hostname, domain))
+    )?.[0] ?? null
+  );
+}
+
+function normalizeDayEntry(entry) {
+  if (typeof entry === "number") {
+    return {
+      total: entry,
+      sites: entry > 0 ? { twitter: entry } : {}
+    };
+  }
+
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return {
+      total: 0,
+      sites: {}
+    };
+  }
+
+  const sites =
+    entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
+      ? Object.fromEntries(
+          Object.entries(entry.sites)
+            .filter(([siteId, count]) => siteId in TRACKED_SITES && Number.isFinite(count) && count > 0)
+            .map(([siteId, count]) => [siteId, count])
+        )
+      : {};
+  const derivedTotal = Object.values(sites).reduce((sum, count) => sum + count, 0);
+  const total = Number.isFinite(entry.total) && entry.total >= derivedTotal ? entry.total : derivedTotal;
+
+  return {
+    total,
+    sites
+  };
+}
 
 function getTodayKey() {
   const now = new Date();
@@ -112,7 +178,7 @@ function enableDragging(badge) {
     await saveBadgePosition(position);
 
     if (!didDrag) {
-      await chrome.runtime.sendMessage({ type: "OPEN_TRACKER_POPUP" });
+      await chrome.runtime.sendMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
     }
   }
 
@@ -136,28 +202,33 @@ function ensureBadge() {
   return badge;
 }
 
-function getTodayCount(dailyCounts) {
+function getTodayCount(dailyCounts, siteId) {
   if (!dailyCounts || typeof dailyCounts !== "object") {
     return 0;
   }
 
-  return dailyCounts[getTodayKey()] ?? 0;
+  const todayEntry = normalizeDayEntry(dailyCounts[getTodayKey()]);
+  return todayEntry.sites[siteId] ?? 0;
 }
 
 function renderCount(count) {
   const badge = ensureBadge();
-  badge.textContent = `Twitter opens today: ${count}`;
+  const siteId = getCurrentSiteId();
+  const siteLabel = siteId ? TRACKED_SITES[siteId].label : "Tracked site";
+  badge.textContent = `👀 ${count}`;
+  badge.setAttribute("aria-label", `${siteLabel} opens today: ${count}`);
 }
 
 async function initializeBadge() {
   const badge = ensureBadge();
+  const siteId = getCurrentSiteId();
   const [storedCounts, storedPosition] = await Promise.all([
     chrome.storage.local.get(DAILY_COUNTS_KEY),
     loadBadgePosition()
   ]);
 
   applyBadgePosition(badge, storedPosition);
-  renderCount(getTodayCount(storedCounts[DAILY_COUNTS_KEY]));
+  renderCount(getTodayCount(storedCounts[DAILY_COUNTS_KEY], siteId));
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -166,9 +237,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   const badge = ensureBadge();
+  const siteId = getCurrentSiteId();
 
   if (changes[DAILY_COUNTS_KEY]) {
-    renderCount(getTodayCount(changes[DAILY_COUNTS_KEY].newValue));
+    renderCount(getTodayCount(changes[DAILY_COUNTS_KEY].newValue, siteId));
   }
 
   if (changes[BADGE_POSITION_KEY]) {
