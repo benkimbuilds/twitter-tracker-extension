@@ -4,35 +4,24 @@ const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 const CHART_DAYS = 14;
 const SVG_NS = "http://www.w3.org/2000/svg";
-const DEFAULT_SITE_ID = "twitter";
-const TRACKED_SITES = {
-  linkedin: {
-    label: "LinkedIn",
-    domains: ["linkedin.com"]
-  },
-  youtube: {
-    label: "YouTube",
-    domains: ["youtube.com"]
-  },
-  twitter: {
-    label: "Twitter",
-    domains: ["x.com", "twitter.com"]
-  },
-  facebook: {
-    label: "Facebook",
-    domains: ["facebook.com"]
-  },
-  instagram: {
-    label: "Instagram",
-    domains: ["instagram.com"]
-  }
-};
-const TRACKED_SITE_IDS = Object.keys(TRACKED_SITES);
 
-let currentSiteId = DEFAULT_SITE_ID;
+let currentSiteId = getFallbackSiteId([]);
+let customSitesState = [];
+let trackedSitesState = getTrackedSites(customSitesState);
+let trackedSiteMapState = getTrackedSiteMap(customSitesState);
 let cachedDailyCounts = {};
 let isBlockModeEnabled = false;
-let blockedSitesState = Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
+let blockedSitesState = normalizeBlockedSites({}, customSitesState);
+
+function refreshTrackedSitesState() {
+  trackedSitesState = getTrackedSites(customSitesState);
+  trackedSiteMapState = getTrackedSiteMap(customSitesState);
+  blockedSitesState = normalizeBlockedSites(blockedSitesState, customSitesState);
+
+  if (!currentSiteId || !(currentSiteId in trackedSiteMapState)) {
+    currentSiteId = getFallbackSiteId(customSitesState);
+  }
+}
 
 function getTodayKey() {
   const now = new Date();
@@ -61,27 +50,6 @@ function formatLabel(dateKey) {
   });
 }
 
-function matchesDomain(hostname, domain) {
-  return hostname === domain || hostname.endsWith(`.${domain}`);
-}
-
-function getTrackedSiteIdFromUrl(url) {
-  if (!url) {
-    return null;
-  }
-
-  try {
-    const parsedUrl = new URL(url);
-    return (
-      Object.entries(TRACKED_SITES).find(([, site]) =>
-        site.domains.some((domain) => matchesDomain(parsedUrl.hostname, domain))
-      )?.[0] ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
 function emptyDayEntry() {
   return {
     total: 0,
@@ -93,7 +61,7 @@ function normalizeDayEntry(entry) {
   if (typeof entry === "number") {
     return {
       total: entry,
-      sites: entry > 0 ? { twitter: entry } : {}
+      sites: entry > 0 && trackedSiteMapState.twitter ? { twitter: entry } : {}
     };
   }
 
@@ -105,7 +73,7 @@ function normalizeDayEntry(entry) {
     entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
       ? Object.fromEntries(
           Object.entries(entry.sites)
-            .filter(([siteId, count]) => siteId in TRACKED_SITES && Number.isFinite(count) && count > 0)
+            .filter(([siteId, count]) => siteId in trackedSiteMapState && Number.isFinite(count) && count > 0)
             .map(([siteId, count]) => [siteId, count])
         )
       : {};
@@ -125,16 +93,6 @@ function normalizeDailyCounts(dailyCounts) {
 
   return Object.fromEntries(
     Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
-  );
-}
-
-function normalizeBlockedSites(blockedSites) {
-  if (!blockedSites || typeof blockedSites !== "object" || Array.isArray(blockedSites)) {
-    return Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
-  }
-
-  return Object.fromEntries(
-    TRACKED_SITE_IDS.map((siteId) => [siteId, blockedSites[siteId] !== false])
   );
 }
 
@@ -161,6 +119,31 @@ function setSiteCountForDate(dailyCounts, dateKey, siteId, nextCount) {
   }
 
   dailyCounts[dateKey] = dayEntry;
+}
+
+function removeSiteFromDailyCounts(dailyCounts, siteId) {
+  const nextDailyCounts = normalizeDailyCounts(dailyCounts);
+
+  Object.keys(nextDailyCounts).forEach((dateKey) => {
+    const dayEntry = normalizeDayEntry(nextDailyCounts[dateKey]);
+    const previousCount = dayEntry.sites[siteId] ?? 0;
+
+    if (previousCount === 0) {
+      return;
+    }
+
+    delete dayEntry.sites[siteId];
+    dayEntry.total = Math.max(0, dayEntry.total - previousCount);
+
+    if (dayEntry.total === 0 && Object.keys(dayEntry.sites).length === 0) {
+      delete nextDailyCounts[dateKey];
+      return;
+    }
+
+    nextDailyCounts[dateKey] = dayEntry;
+  });
+
+  return nextDailyCounts;
 }
 
 function getChartData(dailyCounts, siteId) {
@@ -241,9 +224,8 @@ function renderChart(dailyCounts, siteId) {
     return { x, y, count: entry.count };
   });
 
-  const polylinePoints = points.map(({ x, y }) => `${x},${y}`).join(" ");
   appendSvgElement(chart, "polyline", {
-    points: polylinePoints,
+    points: points.map(({ x, y }) => `${x},${y}`).join(" "),
     fill: "none",
     stroke: "#1d9bf0",
     "stroke-width": "3",
@@ -266,28 +248,110 @@ function renderChart(dailyCounts, siteId) {
   document.getElementById("endLabel").textContent = formatLabel(data[data.length - 1].dateKey);
 }
 
-async function getDailyCounts() {
-  const stored = await chrome.storage.local.get(DAILY_COUNTS_KEY);
-  return normalizeDailyCounts(stored[DAILY_COUNTS_KEY]);
+async function getDefaultSiteId(storedPopupSiteId) {
+  const requestedSiteId = new URLSearchParams(window.location.search).get("site");
+  if (requestedSiteId && requestedSiteId in trackedSiteMapState) {
+    return requestedSiteId;
+  }
+
+  try {
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true
+    });
+    const activeSiteId = findTrackedSiteIdByUrl(activeTab?.url, customSitesState);
+    if (activeSiteId) {
+      return activeSiteId;
+    }
+  } catch {
+    // Ignore and fall back to stored preference.
+  }
+
+  if (storedPopupSiteId && storedPopupSiteId in trackedSiteMapState) {
+    return storedPopupSiteId;
+  }
+
+  return getFallbackSiteId(customSitesState);
 }
 
-async function getBlockMode() {
-  const stored = await chrome.storage.local.get(BLOCK_MODE_KEY);
-  return stored[BLOCK_MODE_KEY] === true;
+function setSiteInputMessage(message, tone = "info") {
+  const element = document.getElementById("siteInputMessage");
+  if (!message) {
+    element.hidden = true;
+    element.textContent = "";
+    element.classList.remove("is-error");
+    return;
+  }
+
+  element.hidden = false;
+  element.textContent = message;
+  element.classList.toggle("is-error", tone === "error");
 }
 
-async function getBlockedSites() {
-  const stored = await chrome.storage.local.get(BLOCKED_SITES_KEY);
-  return normalizeBlockedSites(stored[BLOCKED_SITES_KEY]);
+function findConflictingTrackedSite(domain) {
+  return trackedSitesState.find((site) =>
+    site.domains.some((existingDomain) => matchesDomain(domain, existingDomain) || matchesDomain(existingDomain, domain))
+  );
+}
+
+function renderSiteOptions() {
+  const select = document.getElementById("siteSelect");
+  select.textContent = "";
+
+  trackedSitesState.forEach((site) => {
+    const option = document.createElement("option");
+    option.value = site.id;
+    option.textContent = site.label;
+    select.appendChild(option);
+  });
+
+  if (currentSiteId && currentSiteId in trackedSiteMapState) {
+    select.value = currentSiteId;
+  }
+}
+
+async function handleBlockedSiteToggle(siteId, nextValue) {
+  const nextBlockedSites = normalizeBlockedSites(
+    {
+      ...blockedSitesState,
+      [siteId]: nextValue
+    },
+    customSitesState
+  );
+
+  await chrome.storage.local.set({ [BLOCKED_SITES_KEY]: nextBlockedSites });
+}
+
+async function removeCustomSite(siteId) {
+  const site = trackedSiteMapState[siteId];
+  if (!site?.isCustom) {
+    return;
+  }
+
+  const nextCustomSites = customSitesState.filter((customSite) => customSite.id !== siteId);
+  const nextBlockedSitesBase = { ...blockedSitesState };
+  delete nextBlockedSitesBase[siteId];
+  const nextBlockedSites = normalizeBlockedSites(nextBlockedSitesBase, nextCustomSites);
+  const nextDailyCounts = removeSiteFromDailyCounts(cachedDailyCounts, siteId);
+  const nextPopupSiteId =
+    currentSiteId === siteId ? getFallbackSiteId(nextCustomSites) : currentSiteId;
+
+  await chrome.storage.local.set({
+    [CUSTOM_SITES_KEY]: nextCustomSites,
+    [BLOCKED_SITES_KEY]: nextBlockedSites,
+    [DAILY_COUNTS_KEY]: nextDailyCounts,
+    [POPUP_SITE_KEY]: nextPopupSiteId
+  });
+
+  setSiteInputMessage(`Removed ${site.label}.`);
 }
 
 function renderBlockedSites() {
   const list = document.getElementById("blockedSitesList");
   list.textContent = "";
 
-  TRACKED_SITE_IDS.forEach((siteId) => {
-    const site = TRACKED_SITES[siteId];
-    const row = document.createElement("label");
+  trackedSitesState.forEach((site) => {
+    const row = document.createElement("div");
     row.className = "blocked-site-row";
 
     const copy = document.createElement("div");
@@ -299,71 +363,64 @@ function renderBlockedSites() {
 
     const hint = document.createElement("p");
     hint.className = "blocked-site-hint";
-    hint.textContent = blockedSitesState[siteId] ? "Blocked when master mode is on" : "Allowed through";
+    hint.textContent = site.isCustom
+      ? `${site.domains[0]}${blockedSitesState[site.id] ? " • blocked when master mode is on" : " • allowed through"}`
+      : `${site.domains.join(", ")}${blockedSitesState[site.id] ? " • blocked when master mode is on" : " • allowed through"}`;
 
     copy.append(title, hint);
 
-    const toggle = document.createElement("span");
-    toggle.className = "toggle";
+    const actions = document.createElement("div");
+    actions.className = "blocked-site-actions";
 
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = blockedSitesState[siteId];
-    input.dataset.siteId = siteId;
+    const toggleLabel = document.createElement("label");
+    toggleLabel.className = "toggle";
 
-    const track = document.createElement("span");
-    track.className = "toggle-track";
-    track.setAttribute("aria-hidden", "true");
+    const toggleInput = document.createElement("input");
+    toggleInput.type = "checkbox";
+    toggleInput.checked = blockedSitesState[site.id];
 
-    const status = document.createElement("span");
-    status.className = "toggle-copy";
-    status.textContent = blockedSitesState[siteId] ? "Blocked" : "Allowed";
+    const toggleTrack = document.createElement("span");
+    toggleTrack.className = "toggle-track";
+    toggleTrack.setAttribute("aria-hidden", "true");
 
-    input.addEventListener("change", async (event) => {
-      const nextBlockedSites = {
-        ...blockedSitesState,
-        [siteId]: event.target.checked
-      };
-      await chrome.storage.local.set({ [BLOCKED_SITES_KEY]: nextBlockedSites });
+    const toggleCopy = document.createElement("span");
+    toggleCopy.className = "toggle-copy";
+    toggleCopy.textContent = blockedSitesState[site.id] ? "Blocked" : "Allowed";
+
+    toggleInput.addEventListener("change", async (event) => {
+      await handleBlockedSiteToggle(site.id, event.target.checked);
     });
 
-    toggle.append(input, track, status);
-    row.append(copy, toggle);
-    list.append(row);
+    toggleLabel.append(toggleInput, toggleTrack, toggleCopy);
+    actions.appendChild(toggleLabel);
+
+    if (site.isCustom) {
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "secondary-button remove-site-button";
+      removeButton.textContent = "Remove";
+      removeButton.addEventListener("click", async () => {
+        await removeCustomSite(site.id);
+      });
+      actions.appendChild(removeButton);
+    }
+
+    row.append(copy, actions);
+    list.appendChild(row);
   });
 }
 
-async function getDefaultSiteId() {
-  const requestedSiteId = new URLSearchParams(window.location.search).get("site");
-  if (requestedSiteId && requestedSiteId in TRACKED_SITES) {
-    return requestedSiteId;
-  }
-
-  try {
-    const [activeTab] = await chrome.tabs.query({
-      active: true,
-      lastFocusedWindow: true
-    });
-    const activeSiteId = getTrackedSiteIdFromUrl(activeTab?.url);
-    if (activeSiteId) {
-      return activeSiteId;
-    }
-  } catch {
-    // Ignore and fall back to stored preference.
-  }
-
-  const stored = await chrome.storage.local.get(POPUP_SITE_KEY);
-  if (stored[POPUP_SITE_KEY] && stored[POPUP_SITE_KEY] in TRACKED_SITES) {
-    return stored[POPUP_SITE_KEY];
-  }
-
-  return DEFAULT_SITE_ID;
-}
-
 function renderPopup() {
-  const site = TRACKED_SITES[currentSiteId];
-  document.getElementById("blockModeToggle").checked = isBlockModeEnabled;
+  refreshTrackedSitesState();
+  renderSiteOptions();
   renderBlockedSites();
+  document.getElementById("blockModeToggle").checked = isBlockModeEnabled;
+
+  const site = trackedSiteMapState[currentSiteId];
+  if (!site) {
+    return;
+  }
+
   document.getElementById("todayLabel").textContent = `${site.label} today`;
   document.getElementById("todayCount").textContent = String(
     getSiteCountForDate(cachedDailyCounts, getTodayKey(), currentSiteId)
@@ -389,19 +446,66 @@ async function clearHistory() {
   await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: nextDailyCounts });
 }
 
+async function addCustomSiteFromForm(event) {
+  event.preventDefault();
+
+  const input = document.getElementById("siteDomainInput");
+  const site = createCustomSite(input.value);
+
+  if (!site) {
+    setSiteInputMessage("Enter a valid domain like reddit.com.", "error");
+    return;
+  }
+
+  const conflictingSite = findConflictingTrackedSite(site.domains[0]);
+  if (conflictingSite) {
+    setSiteInputMessage(`${site.label} overlaps with ${conflictingSite.label}. Add a non-overlapping domain instead.`, "error");
+    return;
+  }
+
+  const existingSite = trackedSitesState.find((trackedSite) => trackedSite.id === site.id);
+  if (existingSite) {
+    currentSiteId = existingSite.id;
+    await chrome.storage.local.set({ [POPUP_SITE_KEY]: existingSite.id });
+    input.value = "";
+    setSiteInputMessage(`${existingSite.label} is already in your tracked list.`);
+    return;
+  }
+
+  const nextCustomSites = [...customSitesState, site];
+  const nextBlockedSites = normalizeBlockedSites(
+    {
+      ...blockedSitesState,
+      [site.id]: true
+    },
+    nextCustomSites
+  );
+
+  await chrome.storage.local.set({
+    [CUSTOM_SITES_KEY]: nextCustomSites,
+    [BLOCKED_SITES_KEY]: nextBlockedSites,
+    [POPUP_SITE_KEY]: site.id
+  });
+
+  input.value = "";
+  setSiteInputMessage(`Added ${site.label}.`);
+}
+
 async function initializePopup() {
-  const [dailyCounts, defaultSiteId, blockModeEnabled, blockedSites] = await Promise.all([
-    getDailyCounts(),
-    getDefaultSiteId(),
-    getBlockMode(),
-    getBlockedSites()
+  const stored = await chrome.storage.local.get([
+    DAILY_COUNTS_KEY,
+    POPUP_SITE_KEY,
+    BLOCK_MODE_KEY,
+    BLOCKED_SITES_KEY,
+    CUSTOM_SITES_KEY
   ]);
-  cachedDailyCounts = dailyCounts;
-  currentSiteId = defaultSiteId;
-  isBlockModeEnabled = blockModeEnabled;
-  blockedSitesState = blockedSites;
-  const siteSelect = document.getElementById("siteSelect");
-  siteSelect.value = currentSiteId;
+
+  customSitesState = normalizeCustomSites(stored[CUSTOM_SITES_KEY]);
+  blockedSitesState = normalizeBlockedSites(stored[BLOCKED_SITES_KEY], customSitesState);
+  refreshTrackedSitesState();
+  cachedDailyCounts = normalizeDailyCounts(stored[DAILY_COUNTS_KEY]);
+  isBlockModeEnabled = stored[BLOCK_MODE_KEY] === true;
+  currentSiteId = await getDefaultSiteId(stored[POPUP_SITE_KEY]);
   renderPopup();
 }
 
@@ -411,6 +515,7 @@ document.getElementById("siteSelect").addEventListener("change", async (event) =
   renderPopup();
 });
 
+document.getElementById("addSiteForm").addEventListener("submit", addCustomSiteFromForm);
 document.getElementById("resetTodayButton").addEventListener("click", resetToday);
 document.getElementById("clearHistoryButton").addEventListener("click", clearHistory);
 document.getElementById("blockModeToggle").addEventListener("change", async (event) => {
@@ -422,21 +527,24 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
 
+  if (changes[CUSTOM_SITES_KEY]) {
+    customSitesState = normalizeCustomSites(changes[CUSTOM_SITES_KEY].newValue);
+  }
+
+  if (changes[BLOCKED_SITES_KEY]) {
+    blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue, customSitesState);
+  }
+
   if (changes[DAILY_COUNTS_KEY]) {
     cachedDailyCounts = normalizeDailyCounts(changes[DAILY_COUNTS_KEY].newValue);
   }
 
-  if (changes[POPUP_SITE_KEY] && changes[POPUP_SITE_KEY].newValue in TRACKED_SITES) {
+  if (changes[POPUP_SITE_KEY] && changes[POPUP_SITE_KEY].newValue in getTrackedSiteMap(customSitesState)) {
     currentSiteId = changes[POPUP_SITE_KEY].newValue;
-    document.getElementById("siteSelect").value = currentSiteId;
   }
 
   if (changes[BLOCK_MODE_KEY]) {
     isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
-  }
-
-  if (changes[BLOCKED_SITES_KEY]) {
-    blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue);
   }
 
   renderPopup();

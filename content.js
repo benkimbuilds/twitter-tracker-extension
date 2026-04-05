@@ -4,51 +4,181 @@ const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 const BADGE_ID = "twitter-open-tracker-badge";
 const BLOCKER_ID = "twitter-open-tracker-blocker";
-const TRACKED_SITES = {
-  facebook: {
-    domains: ["facebook.com"],
-    label: "Facebook"
-  },
-  instagram: {
-    domains: ["instagram.com"],
-    label: "Instagram"
-  },
-  linkedin: {
-    domains: ["linkedin.com"],
-    label: "LinkedIn"
-  },
-  twitter: {
-    domains: ["x.com", "twitter.com"],
-    label: "Twitter"
-  },
-  youtube: {
-    domains: ["youtube.com"],
-    label: "YouTube"
-  }
-};
-const TRACKED_SITE_IDS = Object.keys(TRACKED_SITES);
 const DEFAULT_BADGE_POSITION = { top: 16, left: null, right: 16 };
+const BLOCKER_SHADOW_STYLES = `
+  :host {
+    color: #f7f9f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  .twitter-open-tracker-blocker__panel {
+    width: min(100%, 420px);
+    padding: 28px 24px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+    color: #f7f9f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .twitter-open-tracker-blocker__eyebrow,
+  .twitter-open-tracker-blocker__copy,
+  .twitter-open-tracker-blocker__count {
+    margin: 0;
+  }
+
+  .twitter-open-tracker-blocker__eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8b98a5;
+  }
+
+  .twitter-open-tracker-blocker__title {
+    margin: 10px 0 12px;
+    font-size: clamp(28px, 4vw, 36px);
+    line-height: 1.05;
+    font-weight: 700;
+    letter-spacing: normal;
+    color: #f7f9f9;
+  }
+
+  .twitter-open-tracker-blocker__copy {
+    color: rgba(247, 249, 249, 0.78);
+    line-height: 1.5;
+    font-size: 16px;
+    font-weight: 400;
+  }
+
+  .twitter-open-tracker-blocker__count {
+    margin-top: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #86cbff;
+  }
+
+  .twitter-open-tracker-blocker__button {
+    margin-top: 18px;
+    border: 0;
+    border-radius: 999px;
+    padding: 12px 16px;
+    background: #1d9bf0;
+    color: #fff;
+    font: 700 16px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: normal;
+    cursor: pointer;
+    appearance: none;
+  }
+
+  .twitter-open-tracker-blocker__button:hover {
+    background: #1a8cd8;
+  }
+`;
+
+let customSitesState = [];
+let trackedSiteMapState = getTrackedSiteMap(customSitesState);
+let cachedDailyCounts = {};
 let currentBadgeCount = 0;
 let isBlockModeEnabled = false;
-let blockedSitesState = Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
+let blockedSitesState = normalizeBlockedSites({}, customSitesState);
 
-function matchesDomain(hostname, domain) {
-  return hostname === domain || hostname.endsWith(`.${domain}`);
+function isExtensionContextInvalidatedError(error) {
+  return error instanceof Error && error.message.includes("Extension context invalidated");
+}
+
+function isExtensionContextInvalidatedReason(reason) {
+  if (isExtensionContextInvalidatedError(reason)) {
+    return true;
+  }
+
+  return typeof reason === "string" && reason.includes("Extension context invalidated");
+}
+
+function hasLiveExtensionContext() {
+  return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
+}
+
+window.addEventListener("error", (event) => {
+  if (isExtensionContextInvalidatedReason(event.error ?? event.message)) {
+    event.preventDefault();
+  }
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (isExtensionContextInvalidatedReason(event.reason)) {
+    event.preventDefault();
+  }
+});
+
+async function safeStorageGet(keys, fallback = {}) {
+  if (!hasLiveExtensionContext()) {
+    return fallback;
+  }
+
+  try {
+    return await chrome.storage.local.get(keys);
+  } catch (error) {
+    if (isExtensionContextInvalidatedError(error)) {
+      return fallback;
+    }
+
+    throw error;
+  }
+}
+
+async function safeStorageSet(values) {
+  if (!hasLiveExtensionContext()) {
+    return false;
+  }
+
+  try {
+    await chrome.storage.local.set(values);
+    return true;
+  } catch (error) {
+    if (isExtensionContextInvalidatedError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function safeRuntimeMessage(message) {
+  if (!hasLiveExtensionContext()) {
+    return null;
+  }
+
+  try {
+    return await chrome.runtime.sendMessage(message);
+  } catch (error) {
+    if (isExtensionContextInvalidatedError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function refreshTrackedSitesState() {
+  trackedSiteMapState = getTrackedSiteMap(customSitesState);
+  blockedSitesState = normalizeBlockedSites(blockedSitesState, customSitesState);
 }
 
 function getCurrentSiteId() {
-  return (
-    Object.entries(TRACKED_SITES).find(([, site]) =>
-      site.domains.some((domain) => matchesDomain(window.location.hostname, domain))
-    )?.[0] ?? null
-  );
+  return findTrackedSiteIdByHostname(window.location.hostname, customSitesState);
 }
 
 function normalizeDayEntry(entry) {
   if (typeof entry === "number") {
     return {
       total: entry,
-      sites: entry > 0 ? { twitter: entry } : {}
+      sites: entry > 0 && trackedSiteMapState.twitter ? { twitter: entry } : {}
     };
   }
 
@@ -63,7 +193,7 @@ function normalizeDayEntry(entry) {
     entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
       ? Object.fromEntries(
           Object.entries(entry.sites)
-            .filter(([siteId, count]) => siteId in TRACKED_SITES && Number.isFinite(count) && count > 0)
+            .filter(([siteId, count]) => siteId in trackedSiteMapState && Number.isFinite(count) && count > 0)
             .map(([siteId, count]) => [siteId, count])
         )
       : {};
@@ -76,13 +206,13 @@ function normalizeDayEntry(entry) {
   };
 }
 
-function normalizeBlockedSites(blockedSites) {
-  if (!blockedSites || typeof blockedSites !== "object" || Array.isArray(blockedSites)) {
-    return Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
+function normalizeDailyCounts(dailyCounts) {
+  if (!dailyCounts || typeof dailyCounts !== "object" || Array.isArray(dailyCounts)) {
+    return {};
   }
 
   return Object.fromEntries(
-    TRACKED_SITE_IDS.map((siteId) => [siteId, blockedSites[siteId] !== false])
+    Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
   );
 }
 
@@ -105,11 +235,11 @@ function applyBadgePosition(badge, position = DEFAULT_BADGE_POSITION) {
 }
 
 async function saveBadgePosition(position) {
-  await chrome.storage.local.set({ [BADGE_POSITION_KEY]: position });
+  await safeStorageSet({ [BADGE_POSITION_KEY]: position });
 }
 
 async function loadBadgePosition() {
-  const stored = await chrome.storage.local.get(BADGE_POSITION_KEY);
+  const stored = await safeStorageGet(BADGE_POSITION_KEY);
   const position = stored[BADGE_POSITION_KEY];
 
   if (!position || typeof position !== "object" || Array.isArray(position)) {
@@ -195,7 +325,7 @@ function enableDragging(badge) {
     await saveBadgePosition(position);
 
     if (!didDrag) {
-      await chrome.runtime.sendMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
+      await safeRuntimeMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
     }
   }
 
@@ -231,7 +361,9 @@ function ensureBlocker() {
   blocker.hidden = true;
   blocker.tabIndex = -1;
   blocker.setAttribute("aria-live", "polite");
-  blocker.innerHTML = `
+  const shadowRoot = blocker.attachShadow({ mode: "open" });
+  shadowRoot.innerHTML = `
+    <style>${BLOCKER_SHADOW_STYLES}</style>
     <div class="twitter-open-tracker-blocker__panel">
       <p class="twitter-open-tracker-blocker__eyebrow">Block mode on</p>
       <h1 class="twitter-open-tracker-blocker__title"></h1>
@@ -241,12 +373,17 @@ function ensureBlocker() {
     </div>
   `;
 
-  blocker.querySelector("button")?.addEventListener("click", async () => {
-    await chrome.runtime.sendMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
+  shadowRoot.querySelector("button")?.addEventListener("click", async () => {
+    await safeRuntimeMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
   });
 
   document.documentElement.appendChild(blocker);
   return blocker;
+}
+
+function getBlockerShadowElement(selector) {
+  const blocker = ensureBlocker();
+  return blocker.shadowRoot?.querySelector(selector) ?? null;
 }
 
 function getTodayCount(dailyCounts, siteId) {
@@ -273,19 +410,26 @@ function getBadgeCount(dailyCounts, siteId) {
 function renderCount(count) {
   const badge = ensureBadge();
   const siteId = getCurrentSiteId();
-  const siteLabel = siteId ? TRACKED_SITES[siteId].label : "All tracked sites";
+  const siteLabel = siteId ? (trackedSiteMapState[siteId]?.label ?? "Tracked site") : "All tracked sites";
   badge.textContent = "👀";
   badge.setAttribute("aria-label", `${siteLabel} opens today: ${count}`);
 }
 
 function renderBlocker(count) {
-  const blocker = ensureBlocker();
   const siteId = getCurrentSiteId();
-  const siteLabel = siteId ? TRACKED_SITES[siteId].label : "This site";
-  blocker.querySelector(".twitter-open-tracker-blocker__title").textContent = `${siteLabel} is blocked`;
-  blocker.querySelector(".twitter-open-tracker-blocker__copy").textContent =
+  const siteLabel = siteId ? (trackedSiteMapState[siteId]?.label ?? "This site") : "This site";
+  const title = getBlockerShadowElement(".twitter-open-tracker-blocker__title");
+  const copy = getBlockerShadowElement(".twitter-open-tracker-blocker__copy");
+  const countElement = getBlockerShadowElement(".twitter-open-tracker-blocker__count");
+
+  if (!title || !copy || !countElement) {
+    return;
+  }
+
+  title.textContent = `${siteLabel} is blocked`;
+  copy.textContent =
     `Social Open Tracker is hiding ${siteLabel} until you switch that site's blocker off.`;
-  blocker.querySelector(".twitter-open-tracker-blocker__count").textContent =
+  countElement.textContent =
     `Today's ${siteLabel} opens: ${count}`;
 }
 
@@ -313,43 +457,58 @@ function renderSurface() {
 }
 
 async function initializeBadge() {
-  const siteId = getCurrentSiteId();
-  const [storedValues, storedPosition] = await Promise.all([
-    chrome.storage.local.get([DAILY_COUNTS_KEY, BLOCK_MODE_KEY, BLOCKED_SITES_KEY]),
-    loadBadgePosition()
+  const storedValues = await safeStorageGet([
+    DAILY_COUNTS_KEY,
+    BLOCK_MODE_KEY,
+    BLOCKED_SITES_KEY,
+    CUSTOM_SITES_KEY
   ]);
+  const storedPosition = await loadBadgePosition();
   const badge = ensureBadge();
 
-  applyBadgePosition(badge, storedPosition);
-  currentBadgeCount = getBadgeCount(storedValues[DAILY_COUNTS_KEY], siteId);
+  customSitesState = normalizeCustomSites(storedValues[CUSTOM_SITES_KEY]);
+  blockedSitesState = normalizeBlockedSites(storedValues[BLOCKED_SITES_KEY], customSitesState);
+  refreshTrackedSitesState();
+  cachedDailyCounts = normalizeDailyCounts(storedValues[DAILY_COUNTS_KEY]);
+  currentBadgeCount = getBadgeCount(cachedDailyCounts, getCurrentSiteId());
   isBlockModeEnabled = storedValues[BLOCK_MODE_KEY] === true;
-  blockedSitesState = normalizeBlockedSites(storedValues[BLOCKED_SITES_KEY]);
+
+  applyBadgePosition(badge, storedPosition);
   renderSurface();
 }
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local") {
-    return;
-  }
+if (hasLiveExtensionContext()) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") {
+      return;
+    }
 
-  if (changes[DAILY_COUNTS_KEY]) {
-    currentBadgeCount = getBadgeCount(changes[DAILY_COUNTS_KEY].newValue, getCurrentSiteId());
-  }
+    if (changes[CUSTOM_SITES_KEY]) {
+      customSitesState = normalizeCustomSites(changes[CUSTOM_SITES_KEY].newValue);
+      refreshTrackedSitesState();
+      cachedDailyCounts = normalizeDailyCounts(cachedDailyCounts);
+    }
 
-  if (changes[BADGE_POSITION_KEY]) {
-    applyBadgePosition(ensureBadge(), changes[BADGE_POSITION_KEY].newValue ?? DEFAULT_BADGE_POSITION);
-  }
+    if (changes[DAILY_COUNTS_KEY]) {
+      cachedDailyCounts = normalizeDailyCounts(changes[DAILY_COUNTS_KEY].newValue);
+    }
 
-  if (changes[BLOCK_MODE_KEY]) {
-    isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
-  }
+    if (changes[BADGE_POSITION_KEY]) {
+      applyBadgePosition(ensureBadge(), changes[BADGE_POSITION_KEY].newValue ?? DEFAULT_BADGE_POSITION);
+    }
 
-  if (changes[BLOCKED_SITES_KEY]) {
-    blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue);
-  }
+    if (changes[BLOCK_MODE_KEY]) {
+      isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
+    }
 
-  renderSurface();
-});
+    if (changes[BLOCKED_SITES_KEY]) {
+      blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue, customSitesState);
+    }
+
+    currentBadgeCount = getBadgeCount(cachedDailyCounts, getCurrentSiteId());
+    renderSurface();
+  });
+}
 
 window.addEventListener("resize", async () => {
   const badge = document.getElementById(BADGE_ID);
@@ -370,4 +529,10 @@ window.addEventListener("resize", async () => {
   await saveBadgePosition(position);
 });
 
-initializeBadge();
+initializeBadge().catch((error) => {
+  if (isExtensionContextInvalidatedError(error)) {
+    return;
+  }
+
+  throw error;
+});

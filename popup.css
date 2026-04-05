@@ -13,6 +13,7 @@ body {
 }
 
 .mode-card,
+.add-site-card,
 .blocked-sites-card,
 .hero,
 .chart-card {
@@ -28,6 +29,69 @@ body {
   gap: 14px;
   padding: 16px;
   margin-bottom: 14px;
+}
+
+.add-site-card {
+  padding: 14px 16px 16px;
+  margin-bottom: 14px;
+}
+
+.add-site-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.add-site-label {
+  margin: 0;
+  max-width: 180px;
+}
+
+.add-site-form {
+  display: flex;
+  gap: 10px;
+}
+
+#siteDomainInput {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f7f9f9;
+  font: inherit;
+  font-size: 14px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+#siteDomainInput::placeholder {
+  color: rgba(139, 152, 165, 0.92);
+}
+
+#siteDomainInput:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#siteDomainInput:focus {
+  outline: none;
+  border-color: rgba(29, 155, 240, 0.72);
+  box-shadow: 0 0 0 1px rgba(29, 155, 240, 0.38);
+}
+
+.site-input-message {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #86cbff;
+}
+
+.site-input-message.is-error {
+  color: #ff8b98;
 }
 
 .blocked-sites-card {
@@ -69,6 +133,13 @@ body {
   margin: 4px 0 0;
   font-size: 12px;
   color: #8b98a5;
+}
+
+.blocked-site-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .eyebrow {
@@ -232,6 +303,15 @@ button:hover {
 
 .secondary-button:hover {
   background: rgba(255, 255, 255, 0.14);
+}
+
+.remove-site-button {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.remove-site-button:hover {
+  background: rgba(255, 107, 129, 0.22);
 }
 
 .toggle {

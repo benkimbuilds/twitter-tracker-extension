@@ -2,24 +2,15 @@
   "manifest_version": 3,
   "name": "Social Open Tracker",
   "version": "1.0.0",
-  "description": "Tracks daily opens across selected social sites and shows a floating counter across the web.",
+  "description": "Tracks daily opens across selected websites and shows a floating counter across the web.",
   "permissions": [
     "storage",
     "tabs",
     "webNavigation"
   ],
   "host_permissions": [
-    "https://facebook.com/*",
-    "https://*.facebook.com/*",
-    "https://instagram.com/*",
-    "https://*.instagram.com/*",
-    "https://linkedin.com/*",
-    "https://*.linkedin.com/*",
-    "https://x.com/*",
-    "https://twitter.com/*",
-    "https://*.twitter.com/*",
-    "https://youtube.com/*",
-    "https://*.youtube.com/*"
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -47,6 +38,7 @@
         "https://*/*"
       ],
       "js": [
+        "sites.js",
         "content.js"
       ],
       "css": [

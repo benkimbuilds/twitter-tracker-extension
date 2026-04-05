@@ -1,19 +1,20 @@
 # Social Open Tracker
 
-`Social Open Tracker` is a lightweight Chrome extension that tracks how many times you open LinkedIn, YouTube, X/Twitter, Facebook, and Instagram, then keeps a local daily history on your machine.
+`Social Open Tracker` is a lightweight Chrome extension that tracks how many times you open the websites you care about, then keeps a local daily history on your machine.
 
 It adds a draggable floating counter across normal web pages and a popup with:
 
 - today's open count
 - a 14-day history chart
 - an optional block mode with per-site blocking controls
+- custom website tracking you can add yourself
 - local-only storage with no backend or account sync
 
 ## Features
 
-- Tracks top-level visits to LinkedIn, YouTube, X/Twitter, Facebook, and Instagram
+- Tracks top-level visits to the built-in social sites plus any custom websites you add
 - Shows a floating badge across regular websites
-- Can block individual supported sites behind a blocker screen
+- Can block individual tracked websites behind a blocker screen
 - Saves badge position locally after you move it
 - Resets the visible count naturally by storing data per calendar day
 - Displays daily history in the extension popup
@@ -29,11 +30,11 @@ It adds a draggable floating counter across normal web pages and a popup with:
 
 ## How It Works
 
-- The background service worker listens for top-level navigations to LinkedIn, YouTube, X/Twitter, Facebook, and Instagram.
+- The background service worker listens for top-level navigations to built-in sites and any custom domains you add.
 - Opens are counted into daily buckets using a local date key like `YYYY-MM-DD`.
 - Each day's data stores an aggregate total plus per-site counts.
 - The content script injects the floating badge across regular websites.
-- On tracked sites it shows that site's count for the day; elsewhere it shows the total across all tracked sites for today.
+- On tracked sites it shows that site's count for the day in the accessibility label; elsewhere it still shows the eyes badge while using the total internally.
 - When block mode is enabled, the same content script swaps only the selected tracked sites for a local blocker overlay instead.
 - The popup reads the same local store and renders the recent chart.
 
@@ -51,19 +52,22 @@ Tracked data is limited to:
 
 - daily open counts
 - saved floating badge position
+- your custom tracked-site list
+- your per-site block settings
 
 ## Permissions
 
 - `storage`: saves your daily counts and badge position locally
 - `tabs`: used when opening the popup fallback flow from the floating badge
-- `webNavigation`: counts top-level opens of the tracked sites
-- `host_permissions` for LinkedIn, YouTube, X/Twitter, Facebook, and Instagram: required to detect and count visits on those tracked sites
+- `webNavigation`: counts top-level opens of tracked websites
+- `host_permissions` for regular websites: required so custom domains can be detected, counted, and blocked
 
 ## Development
 
 Main files:
 
 - `manifest.json`
+- `sites.js`
 - `background.js`
 - `content.js`
 - `content.css`
@@ -77,8 +81,8 @@ Before Chrome Web Store submission, make sure your store listing clearly states:
 
 - the single purpose of the extension
 - that data is stored locally
-- that it only operates on LinkedIn, YouTube, X/Twitter, Facebook, and Instagram pages
+- that it can operate on built-in sites plus any domains the user adds manually
 
 ## Disclaimer
 
-This project is not affiliated with, endorsed by, or sponsored by LinkedIn, Google/YouTube, Meta, X Corp., or Twitter.
+This project is not affiliated with, endorsed by, or sponsored by LinkedIn, Google/YouTube, Meta, X Corp., Twitter, or any other tracked website.

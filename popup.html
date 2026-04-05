@@ -12,8 +12,8 @@
       <section class="mode-card">
         <div>
           <p class="metric-label">Mode</p>
-          <h2>Block tracked sites</h2>
-          <p class="label mode-label">Use the master toggle plus per-site switches to decide which supported sites get blocked.</p>
+          <h2>Block tracked websites</h2>
+          <p class="label mode-label">Use the master toggle plus per-site switches to decide which tracked websites get blocked.</p>
         </div>
         <label class="toggle" for="blockModeToggle">
           <input id="blockModeToggle" type="checkbox">
@@ -21,10 +21,31 @@
           <span class="toggle-copy">Enabled</span>
         </label>
       </section>
+      <section class="add-site-card" aria-labelledby="addSiteTitle">
+        <div class="add-site-header">
+          <div>
+            <p class="metric-label">Add Site</p>
+            <h2 id="addSiteTitle">Track any website</h2>
+          </div>
+          <p class="label add-site-label">Enter a domain like reddit.com or news.ycombinator.com.</p>
+        </div>
+        <form id="addSiteForm" class="add-site-form">
+          <input
+            id="siteDomainInput"
+            type="text"
+            placeholder="example.com"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <button type="submit">Add site</button>
+        </form>
+        <p id="siteInputMessage" class="site-input-message" hidden></p>
+      </section>
       <section class="blocked-sites-card" aria-labelledby="blockedSitesTitle">
         <div class="blocked-sites-header">
           <div>
-            <p class="metric-label">Blocked Sites</p>
+            <p class="metric-label">Tracked Sites</p>
             <h2 id="blockedSitesTitle">Choose what gets blocked</h2>
           </div>
         </div>
@@ -33,13 +54,7 @@
       <section class="site-picker">
         <label class="site-picker-label" for="siteSelect">Website</label>
         <div class="site-picker-control">
-          <select id="siteSelect">
-            <option value="linkedin">LinkedIn</option>
-            <option value="youtube">YouTube</option>
-            <option value="twitter">Twitter</option>
-            <option value="facebook">Facebook</option>
-            <option value="instagram">Instagram</option>
-          </select>
+          <select id="siteSelect"></select>
         </div>
       </section>
       <section class="hero">
@@ -66,6 +81,7 @@
         </div>
       </section>
     </main>
+    <script src="sites.js"></script>
     <script src="popup.js"></script>
   </body>
   </html>
