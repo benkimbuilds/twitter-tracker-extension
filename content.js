@@ -89,7 +89,23 @@ let isBlockModeEnabled = false;
 let blockedSitesState = normalizeBlockedSites({}, customSitesState);
 
 function isExtensionContextInvalidatedError(error) {
-  return error instanceof Error && error.message.includes("Extension context invalidated");
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return typeof error.message === "string" && error.message.includes("Extension context invalidated");
+}
+
+function reportContentScriptError(scope, error) {
+  if (isExtensionContextInvalidatedError(error)) {
+    return;
+  }
+
+  try {
+    console.error(`[tracker:${scope}]`, error);
+  } catch {
+    // Ignore console failures in hostile page contexts.
+  }
 }
 
 function isExtensionContextInvalidatedReason(reason) {
@@ -101,7 +117,16 @@ function isExtensionContextInvalidatedReason(reason) {
 }
 
 function hasLiveExtensionContext() {
-  return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
+  if (typeof chrome === "undefined") {
+    return false;
+  }
+
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch (error) {
+    reportContentScriptError("runtime-check", error);
+    return false;
+  }
 }
 
 window.addEventListener("error", (event) => {
@@ -124,11 +149,8 @@ async function safeStorageGet(keys, fallback = {}) {
   try {
     return await chrome.storage.local.get(keys);
   } catch (error) {
-    if (isExtensionContextInvalidatedError(error)) {
-      return fallback;
-    }
-
-    throw error;
+    reportContentScriptError("storage-get", error);
+    return fallback;
   }
 }
 
@@ -141,11 +163,8 @@ async function safeStorageSet(values) {
     await chrome.storage.local.set(values);
     return true;
   } catch (error) {
-    if (isExtensionContextInvalidatedError(error)) {
-      return false;
-    }
-
-    throw error;
+    reportContentScriptError("storage-set", error);
+    return false;
   }
 }
 
@@ -157,11 +176,8 @@ async function safeRuntimeMessage(message) {
   try {
     return await chrome.runtime.sendMessage(message);
   } catch (error) {
-    if (isExtensionContextInvalidatedError(error)) {
-      return null;
-    }
-
-    throw error;
+    reportContentScriptError("runtime-message", error);
+    return null;
   }
 }
 
@@ -530,9 +546,5 @@ window.addEventListener("resize", async () => {
 });
 
 initializeBadge().catch((error) => {
-  if (isExtensionContextInvalidatedError(error)) {
-    return;
-  }
-
-  throw error;
+  reportContentScriptError("initialize", error);
 });
