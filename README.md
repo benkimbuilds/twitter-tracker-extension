@@ -6,12 +6,14 @@ It adds a draggable floating counter on each tracked site and a popup with:
 
 - today's open count
 - a 14-day history chart
+- an optional block mode for all supported sites
 - local-only storage with no backend or account sync
 
 ## Features
 
 - Tracks top-level visits to LinkedIn, YouTube, X/Twitter, Facebook, and Instagram
 - Shows a floating badge on those tracked sites
+- Can replace those sites with a blocker screen when block mode is enabled
 - Saves badge position locally after you move it
 - Resets the visible count naturally by storing data per calendar day
 - Displays daily history in the extension popup
@@ -31,6 +33,7 @@ It adds a draggable floating counter on each tracked site and a popup with:
 - Opens are counted into daily buckets using a local date key like `YYYY-MM-DD`.
 - Each day's data stores an aggregate total plus per-site counts.
 - The content script injects the floating badge on each tracked site and shows that site's count for the day.
+- When block mode is enabled, the same content script swaps the page for a local blocker overlay instead.
 - The popup reads the same local store and renders the recent chart.
 
 ## Privacy

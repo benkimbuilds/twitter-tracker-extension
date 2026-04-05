@@ -1,6 +1,8 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const BADGE_POSITION_KEY = "twitterTrackerBadgePosition";
+const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const BADGE_ID = "twitter-open-tracker-badge";
+const BLOCKER_ID = "twitter-open-tracker-blocker";
 const TRACKED_SITES = {
   facebook: {
     domains: ["facebook.com"],
@@ -24,6 +26,8 @@ const TRACKED_SITES = {
   }
 };
 const DEFAULT_BADGE_POSITION = { top: 16, left: null, right: 16 };
+let currentBadgeCount = 0;
+let isBlockModeEnabled = false;
 
 function matchesDomain(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -202,6 +206,36 @@ function ensureBadge() {
   return badge;
 }
 
+function ensureBlocker() {
+  let blocker = document.getElementById(BLOCKER_ID);
+
+  if (blocker) {
+    return blocker;
+  }
+
+  blocker = document.createElement("section");
+  blocker.id = BLOCKER_ID;
+  blocker.hidden = true;
+  blocker.tabIndex = -1;
+  blocker.setAttribute("aria-live", "polite");
+  blocker.innerHTML = `
+    <div class="twitter-open-tracker-blocker__panel">
+      <p class="twitter-open-tracker-blocker__eyebrow">Block mode on</p>
+      <h1 class="twitter-open-tracker-blocker__title"></h1>
+      <p class="twitter-open-tracker-blocker__copy"></p>
+      <p class="twitter-open-tracker-blocker__count"></p>
+      <button class="twitter-open-tracker-blocker__button" type="button">Open tracker controls</button>
+    </div>
+  `;
+
+  blocker.querySelector("button")?.addEventListener("click", async () => {
+    await chrome.runtime.sendMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
+  });
+
+  document.documentElement.appendChild(blocker);
+  return blocker;
+}
+
 function getTodayCount(dailyCounts, siteId) {
   if (!dailyCounts || typeof dailyCounts !== "object") {
     return 0;
@@ -219,16 +253,46 @@ function renderCount(count) {
   badge.setAttribute("aria-label", `${siteLabel} opens today: ${count}`);
 }
 
-async function initializeBadge() {
-  const badge = ensureBadge();
+function renderBlocker(count) {
+  const blocker = ensureBlocker();
   const siteId = getCurrentSiteId();
-  const [storedCounts, storedPosition] = await Promise.all([
-    chrome.storage.local.get(DAILY_COUNTS_KEY),
+  const siteLabel = siteId ? TRACKED_SITES[siteId].label : "This site";
+  blocker.querySelector(".twitter-open-tracker-blocker__title").textContent = `${siteLabel} is blocked`;
+  blocker.querySelector(".twitter-open-tracker-blocker__copy").textContent =
+    `Social Open Tracker is hiding ${siteLabel} until you turn block mode off.`;
+  blocker.querySelector(".twitter-open-tracker-blocker__count").textContent =
+    `Today's ${siteLabel} opens: ${count}`;
+}
+
+function renderSurface() {
+  const badge = ensureBadge();
+  const blocker = ensureBlocker();
+
+  badge.hidden = isBlockModeEnabled;
+  blocker.hidden = !isBlockModeEnabled;
+  document.documentElement.classList.toggle("twitter-open-tracker-page-blocked", isBlockModeEnabled);
+
+  if (isBlockModeEnabled) {
+    renderBlocker(currentBadgeCount);
+    blocker.focus({ preventScroll: true });
+    return;
+  }
+
+  renderCount(currentBadgeCount);
+}
+
+async function initializeBadge() {
+  const siteId = getCurrentSiteId();
+  const [storedValues, storedPosition] = await Promise.all([
+    chrome.storage.local.get([DAILY_COUNTS_KEY, BLOCK_MODE_KEY]),
     loadBadgePosition()
   ]);
+  const badge = ensureBadge();
 
   applyBadgePosition(badge, storedPosition);
-  renderCount(getTodayCount(storedCounts[DAILY_COUNTS_KEY], siteId));
+  currentBadgeCount = getTodayCount(storedValues[DAILY_COUNTS_KEY], siteId);
+  isBlockModeEnabled = storedValues[BLOCK_MODE_KEY] === true;
+  renderSurface();
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -236,16 +300,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
 
-  const badge = ensureBadge();
-  const siteId = getCurrentSiteId();
-
   if (changes[DAILY_COUNTS_KEY]) {
-    renderCount(getTodayCount(changes[DAILY_COUNTS_KEY].newValue, siteId));
+    currentBadgeCount = getTodayCount(changes[DAILY_COUNTS_KEY].newValue, getCurrentSiteId());
   }
 
   if (changes[BADGE_POSITION_KEY]) {
-    applyBadgePosition(badge, changes[BADGE_POSITION_KEY].newValue ?? DEFAULT_BADGE_POSITION);
+    applyBadgePosition(ensureBadge(), changes[BADGE_POSITION_KEY].newValue ?? DEFAULT_BADGE_POSITION);
   }
+
+  if (changes[BLOCK_MODE_KEY]) {
+    isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
+  }
+
+  renderSurface();
 });
 
 window.addEventListener("resize", async () => {

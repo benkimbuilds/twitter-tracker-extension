@@ -1,5 +1,6 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const LEGACY_COUNT_KEY = "twitterOpenCount";
+const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const TRACKED_SITES = {
   facebook: {
     domains: ["facebook.com"]
@@ -141,6 +142,11 @@ async function incrementOpenCount(siteId) {
   await setDailyCounts(dailyCounts);
 }
 
+async function isBlockModeEnabled() {
+  const stored = await chrome.storage.local.get(BLOCK_MODE_KEY);
+  return stored[BLOCK_MODE_KEY] === true;
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   await migrateLegacyCount();
 });
@@ -157,6 +163,10 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
   const siteId = getTrackedSiteId(details.url);
 
   if (!siteId) {
+    return;
+  }
+
+  if (await isBlockModeEnabled()) {
     return;
   }
 

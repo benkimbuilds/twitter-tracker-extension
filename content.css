@@ -20,3 +20,91 @@
 #twitter-open-tracker-badge.is-dragging {
   cursor: grabbing;
 }
+
+#twitter-open-tracker-badge[hidden],
+#twitter-open-tracker-blocker[hidden] {
+  display: none !important;
+}
+
+html.twitter-open-tracker-page-blocked,
+html.twitter-open-tracker-page-blocked body {
+  overflow: hidden !important;
+}
+
+#twitter-open-tracker-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(29, 155, 240, 0.22), transparent 28%),
+    rgba(15, 20, 25, 0.96);
+  backdrop-filter: blur(18px);
+  color: #f7f9f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.twitter-open-tracker-blocker__panel {
+  width: min(100%, 420px);
+  padding: 28px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+}
+
+.twitter-open-tracker-blocker__panel,
+.twitter-open-tracker-blocker__panel * {
+  color: #f7f9f9 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+
+.twitter-open-tracker-blocker__eyebrow,
+.twitter-open-tracker-blocker__copy,
+.twitter-open-tracker-blocker__count {
+  margin: 0;
+}
+
+.twitter-open-tracker-blocker__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b98a5 !important;
+}
+
+.twitter-open-tracker-blocker__title {
+  margin: 10px 0 12px;
+  font-size: clamp(28px, 4vw, 36px);
+  line-height: 1.05;
+}
+
+.twitter-open-tracker-blocker__copy {
+  color: rgba(247, 249, 249, 0.78) !important;
+  line-height: 1.5;
+}
+
+.twitter-open-tracker-blocker__count {
+  margin-top: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #86cbff !important;
+}
+
+.twitter-open-tracker-blocker__button {
+  margin-top: 18px;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 16px;
+  background: #1d9bf0;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.twitter-open-tracker-blocker__button:hover {
+  background: #1a8cd8;
+}

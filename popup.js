@@ -1,5 +1,6 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const POPUP_SITE_KEY = "twitterTrackerPopupSite";
+const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const CHART_DAYS = 14;
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_SITE_ID = "twitter";
@@ -28,6 +29,7 @@ const TRACKED_SITES = {
 
 let currentSiteId = DEFAULT_SITE_ID;
 let cachedDailyCounts = {};
+let isBlockModeEnabled = false;
 
 function getTodayKey() {
   const now = new Date();
@@ -256,6 +258,11 @@ async function getDailyCounts() {
   return normalizeDailyCounts(stored[DAILY_COUNTS_KEY]);
 }
 
+async function getBlockMode() {
+  const stored = await chrome.storage.local.get(BLOCK_MODE_KEY);
+  return stored[BLOCK_MODE_KEY] === true;
+}
+
 async function getDefaultSiteId() {
   const requestedSiteId = new URLSearchParams(window.location.search).get("site");
   if (requestedSiteId && requestedSiteId in TRACKED_SITES) {
@@ -285,6 +292,7 @@ async function getDefaultSiteId() {
 
 function renderPopup() {
   const site = TRACKED_SITES[currentSiteId];
+  document.getElementById("blockModeToggle").checked = isBlockModeEnabled;
   document.getElementById("todayLabel").textContent = `${site.label} today`;
   document.getElementById("todayCount").textContent = String(
     getSiteCountForDate(cachedDailyCounts, getTodayKey(), currentSiteId)
@@ -311,8 +319,14 @@ async function clearHistory() {
 }
 
 async function initializePopup() {
-  cachedDailyCounts = await getDailyCounts();
-  currentSiteId = await getDefaultSiteId();
+  const [dailyCounts, defaultSiteId, blockModeEnabled] = await Promise.all([
+    getDailyCounts(),
+    getDefaultSiteId(),
+    getBlockMode()
+  ]);
+  cachedDailyCounts = dailyCounts;
+  currentSiteId = defaultSiteId;
+  isBlockModeEnabled = blockModeEnabled;
   const siteSelect = document.getElementById("siteSelect");
   siteSelect.value = currentSiteId;
   renderPopup();
@@ -326,6 +340,9 @@ document.getElementById("siteSelect").addEventListener("change", async (event) =
 
 document.getElementById("resetTodayButton").addEventListener("click", resetToday);
 document.getElementById("clearHistoryButton").addEventListener("click", clearHistory);
+document.getElementById("blockModeToggle").addEventListener("change", async (event) => {
+  await chrome.storage.local.set({ [BLOCK_MODE_KEY]: event.target.checked });
+});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {
@@ -339,6 +356,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[POPUP_SITE_KEY] && changes[POPUP_SITE_KEY].newValue in TRACKED_SITES) {
     currentSiteId = changes[POPUP_SITE_KEY].newValue;
     document.getElementById("siteSelect").value = currentSiteId;
+  }
+
+  if (changes[BLOCK_MODE_KEY]) {
+    isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
   }
 
   renderPopup();
