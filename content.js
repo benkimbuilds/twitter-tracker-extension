@@ -17,6 +17,10 @@ const BLOCKER_SHADOW_STYLES = `
 
   .twitter-open-tracker-blocker__panel {
     width: min(100%, 420px);
+    min-height: 296px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
     padding: 28px 24px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 24px;
@@ -64,7 +68,8 @@ const BLOCKER_SHADOW_STYLES = `
   }
 
   .twitter-open-tracker-blocker__button {
-    margin-top: 18px;
+    margin-top: auto;
+    align-self: flex-start;
     border: 0;
     border-radius: 999px;
     padding: 12px 16px;
@@ -459,17 +464,19 @@ function renderSurface() {
   const blocker = ensureBlocker();
   const shouldShowBlocker = isCurrentSiteBlocked();
 
+  if (shouldShowBlocker) {
+    renderBlocker(currentBadgeCount);
+  } else {
+    renderCount(currentBadgeCount);
+  }
+
   badge.hidden = shouldShowBlocker;
   blocker.hidden = !shouldShowBlocker;
   document.documentElement.classList.toggle("twitter-open-tracker-page-blocked", shouldShowBlocker);
 
   if (shouldShowBlocker) {
-    renderBlocker(currentBadgeCount);
     blocker.focus({ preventScroll: true });
-    return;
   }
-
-  renderCount(currentBadgeCount);
 }
 
 async function initializeBadge() {
