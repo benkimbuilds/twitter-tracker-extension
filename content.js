@@ -1,6 +1,7 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const BADGE_POSITION_KEY = "twitterTrackerBadgePosition";
 const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
+const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 const BADGE_ID = "twitter-open-tracker-badge";
 const BLOCKER_ID = "twitter-open-tracker-blocker";
 const TRACKED_SITES = {
@@ -25,9 +26,11 @@ const TRACKED_SITES = {
     label: "YouTube"
   }
 };
+const TRACKED_SITE_IDS = Object.keys(TRACKED_SITES);
 const DEFAULT_BADGE_POSITION = { top: 16, left: null, right: 16 };
 let currentBadgeCount = 0;
 let isBlockModeEnabled = false;
+let blockedSitesState = Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
 
 function matchesDomain(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -71,6 +74,16 @@ function normalizeDayEntry(entry) {
     total,
     sites
   };
+}
+
+function normalizeBlockedSites(blockedSites) {
+  if (!blockedSites || typeof blockedSites !== "object" || Array.isArray(blockedSites)) {
+    return Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
+  }
+
+  return Object.fromEntries(
+    TRACKED_SITE_IDS.map((siteId) => [siteId, blockedSites[siteId] !== false])
+  );
 }
 
 function getTodayKey() {
@@ -245,11 +258,23 @@ function getTodayCount(dailyCounts, siteId) {
   return todayEntry.sites[siteId] ?? 0;
 }
 
+function getTodayTotal(dailyCounts) {
+  if (!dailyCounts || typeof dailyCounts !== "object") {
+    return 0;
+  }
+
+  return normalizeDayEntry(dailyCounts[getTodayKey()]).total;
+}
+
+function getBadgeCount(dailyCounts, siteId) {
+  return siteId ? getTodayCount(dailyCounts, siteId) : getTodayTotal(dailyCounts);
+}
+
 function renderCount(count) {
   const badge = ensureBadge();
   const siteId = getCurrentSiteId();
-  const siteLabel = siteId ? TRACKED_SITES[siteId].label : "Tracked site";
-  badge.textContent = `👀 ${count}`;
+  const siteLabel = siteId ? TRACKED_SITES[siteId].label : "All tracked sites";
+  badge.textContent = "👀";
   badge.setAttribute("aria-label", `${siteLabel} opens today: ${count}`);
 }
 
@@ -259,20 +284,26 @@ function renderBlocker(count) {
   const siteLabel = siteId ? TRACKED_SITES[siteId].label : "This site";
   blocker.querySelector(".twitter-open-tracker-blocker__title").textContent = `${siteLabel} is blocked`;
   blocker.querySelector(".twitter-open-tracker-blocker__copy").textContent =
-    `Social Open Tracker is hiding ${siteLabel} until you turn block mode off.`;
+    `Social Open Tracker is hiding ${siteLabel} until you switch that site's blocker off.`;
   blocker.querySelector(".twitter-open-tracker-blocker__count").textContent =
     `Today's ${siteLabel} opens: ${count}`;
+}
+
+function isCurrentSiteBlocked() {
+  const currentSiteId = getCurrentSiteId();
+  return currentSiteId !== null && isBlockModeEnabled && blockedSitesState[currentSiteId] === true;
 }
 
 function renderSurface() {
   const badge = ensureBadge();
   const blocker = ensureBlocker();
+  const shouldShowBlocker = isCurrentSiteBlocked();
 
-  badge.hidden = isBlockModeEnabled;
-  blocker.hidden = !isBlockModeEnabled;
-  document.documentElement.classList.toggle("twitter-open-tracker-page-blocked", isBlockModeEnabled);
+  badge.hidden = shouldShowBlocker;
+  blocker.hidden = !shouldShowBlocker;
+  document.documentElement.classList.toggle("twitter-open-tracker-page-blocked", shouldShowBlocker);
 
-  if (isBlockModeEnabled) {
+  if (shouldShowBlocker) {
     renderBlocker(currentBadgeCount);
     blocker.focus({ preventScroll: true });
     return;
@@ -284,14 +315,15 @@ function renderSurface() {
 async function initializeBadge() {
   const siteId = getCurrentSiteId();
   const [storedValues, storedPosition] = await Promise.all([
-    chrome.storage.local.get([DAILY_COUNTS_KEY, BLOCK_MODE_KEY]),
+    chrome.storage.local.get([DAILY_COUNTS_KEY, BLOCK_MODE_KEY, BLOCKED_SITES_KEY]),
     loadBadgePosition()
   ]);
   const badge = ensureBadge();
 
   applyBadgePosition(badge, storedPosition);
-  currentBadgeCount = getTodayCount(storedValues[DAILY_COUNTS_KEY], siteId);
+  currentBadgeCount = getBadgeCount(storedValues[DAILY_COUNTS_KEY], siteId);
   isBlockModeEnabled = storedValues[BLOCK_MODE_KEY] === true;
+  blockedSitesState = normalizeBlockedSites(storedValues[BLOCKED_SITES_KEY]);
   renderSurface();
 }
 
@@ -301,7 +333,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes[DAILY_COUNTS_KEY]) {
-    currentBadgeCount = getTodayCount(changes[DAILY_COUNTS_KEY].newValue, getCurrentSiteId());
+    currentBadgeCount = getBadgeCount(changes[DAILY_COUNTS_KEY].newValue, getCurrentSiteId());
   }
 
   if (changes[BADGE_POSITION_KEY]) {
@@ -310,6 +342,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[BLOCK_MODE_KEY]) {
     isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
+  }
+
+  if (changes[BLOCKED_SITES_KEY]) {
+    blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue);
   }
 
   renderSurface();

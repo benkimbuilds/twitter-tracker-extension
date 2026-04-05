@@ -1,6 +1,7 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const LEGACY_COUNT_KEY = "twitterOpenCount";
 const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
+const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 const TRACKED_SITES = {
   facebook: {
     domains: ["facebook.com"]
@@ -18,6 +19,7 @@ const TRACKED_SITES = {
     domains: ["youtube.com"]
   }
 };
+const TRACKED_SITE_IDS = Object.keys(TRACKED_SITES);
 
 function matchesDomain(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -97,6 +99,16 @@ function normalizeDayEntry(entry) {
   };
 }
 
+function normalizeBlockedSites(blockedSites) {
+  if (!blockedSites || typeof blockedSites !== "object" || Array.isArray(blockedSites)) {
+    return Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
+  }
+
+  return Object.fromEntries(
+    TRACKED_SITE_IDS.map((siteId) => [siteId, blockedSites[siteId] !== false])
+  );
+}
+
 async function migrateLegacyCount() {
   const stored = await chrome.storage.local.get([DAILY_COUNTS_KEY, LEGACY_COUNT_KEY]);
   const legacyCount = stored[LEGACY_COUNT_KEY];
@@ -142,9 +154,14 @@ async function incrementOpenCount(siteId) {
   await setDailyCounts(dailyCounts);
 }
 
-async function isBlockModeEnabled() {
-  const stored = await chrome.storage.local.get(BLOCK_MODE_KEY);
-  return stored[BLOCK_MODE_KEY] === true;
+async function isSiteBlockingEnabled(siteId) {
+  const stored = await chrome.storage.local.get([BLOCK_MODE_KEY, BLOCKED_SITES_KEY]);
+  if (stored[BLOCK_MODE_KEY] !== true) {
+    return false;
+  }
+
+  const blockedSites = normalizeBlockedSites(stored[BLOCKED_SITES_KEY]);
+  return blockedSites[siteId] === true;
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -166,7 +183,7 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
     return;
   }
 
-  if (await isBlockModeEnabled()) {
+  if (await isSiteBlockingEnabled(siteId)) {
     return;
   }
 

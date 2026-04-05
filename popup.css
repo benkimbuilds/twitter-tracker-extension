@@ -13,6 +13,7 @@ body {
 }
 
 .mode-card,
+.blocked-sites-card,
 .hero,
 .chart-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -27,6 +28,47 @@ body {
   gap: 14px;
   padding: 16px;
   margin-bottom: 14px;
+}
+
+.blocked-sites-card {
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.blocked-sites-header {
+  margin-bottom: 10px;
+}
+
+.blocked-sites-list {
+  display: grid;
+  gap: 10px;
+}
+
+.blocked-site-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.blocked-site-copy {
+  min-width: 0;
+}
+
+.blocked-site-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.blocked-site-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #8b98a5;
 }
 
 .eyebrow {
@@ -247,4 +289,9 @@ button:hover {
 
 .toggle input:focus-visible + .toggle-track {
   box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.42);
+}
+
+.blocked-site-row .toggle-copy {
+  min-width: 58px;
+  text-align: right;
 }

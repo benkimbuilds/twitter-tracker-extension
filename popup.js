@@ -1,6 +1,7 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const POPUP_SITE_KEY = "twitterTrackerPopupSite";
 const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
+const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 const CHART_DAYS = 14;
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_SITE_ID = "twitter";
@@ -26,10 +27,12 @@ const TRACKED_SITES = {
     domains: ["instagram.com"]
   }
 };
+const TRACKED_SITE_IDS = Object.keys(TRACKED_SITES);
 
 let currentSiteId = DEFAULT_SITE_ID;
 let cachedDailyCounts = {};
 let isBlockModeEnabled = false;
+let blockedSitesState = Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
 
 function getTodayKey() {
   const now = new Date();
@@ -122,6 +125,16 @@ function normalizeDailyCounts(dailyCounts) {
 
   return Object.fromEntries(
     Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
+  );
+}
+
+function normalizeBlockedSites(blockedSites) {
+  if (!blockedSites || typeof blockedSites !== "object" || Array.isArray(blockedSites)) {
+    return Object.fromEntries(TRACKED_SITE_IDS.map((siteId) => [siteId, true]));
+  }
+
+  return Object.fromEntries(
+    TRACKED_SITE_IDS.map((siteId) => [siteId, blockedSites[siteId] !== false])
   );
 }
 
@@ -263,6 +276,63 @@ async function getBlockMode() {
   return stored[BLOCK_MODE_KEY] === true;
 }
 
+async function getBlockedSites() {
+  const stored = await chrome.storage.local.get(BLOCKED_SITES_KEY);
+  return normalizeBlockedSites(stored[BLOCKED_SITES_KEY]);
+}
+
+function renderBlockedSites() {
+  const list = document.getElementById("blockedSitesList");
+  list.textContent = "";
+
+  TRACKED_SITE_IDS.forEach((siteId) => {
+    const site = TRACKED_SITES[siteId];
+    const row = document.createElement("label");
+    row.className = "blocked-site-row";
+
+    const copy = document.createElement("div");
+    copy.className = "blocked-site-copy";
+
+    const title = document.createElement("p");
+    title.className = "blocked-site-name";
+    title.textContent = site.label;
+
+    const hint = document.createElement("p");
+    hint.className = "blocked-site-hint";
+    hint.textContent = blockedSitesState[siteId] ? "Blocked when master mode is on" : "Allowed through";
+
+    copy.append(title, hint);
+
+    const toggle = document.createElement("span");
+    toggle.className = "toggle";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = blockedSitesState[siteId];
+    input.dataset.siteId = siteId;
+
+    const track = document.createElement("span");
+    track.className = "toggle-track";
+    track.setAttribute("aria-hidden", "true");
+
+    const status = document.createElement("span");
+    status.className = "toggle-copy";
+    status.textContent = blockedSitesState[siteId] ? "Blocked" : "Allowed";
+
+    input.addEventListener("change", async (event) => {
+      const nextBlockedSites = {
+        ...blockedSitesState,
+        [siteId]: event.target.checked
+      };
+      await chrome.storage.local.set({ [BLOCKED_SITES_KEY]: nextBlockedSites });
+    });
+
+    toggle.append(input, track, status);
+    row.append(copy, toggle);
+    list.append(row);
+  });
+}
+
 async function getDefaultSiteId() {
   const requestedSiteId = new URLSearchParams(window.location.search).get("site");
   if (requestedSiteId && requestedSiteId in TRACKED_SITES) {
@@ -293,6 +363,7 @@ async function getDefaultSiteId() {
 function renderPopup() {
   const site = TRACKED_SITES[currentSiteId];
   document.getElementById("blockModeToggle").checked = isBlockModeEnabled;
+  renderBlockedSites();
   document.getElementById("todayLabel").textContent = `${site.label} today`;
   document.getElementById("todayCount").textContent = String(
     getSiteCountForDate(cachedDailyCounts, getTodayKey(), currentSiteId)
@@ -319,14 +390,16 @@ async function clearHistory() {
 }
 
 async function initializePopup() {
-  const [dailyCounts, defaultSiteId, blockModeEnabled] = await Promise.all([
+  const [dailyCounts, defaultSiteId, blockModeEnabled, blockedSites] = await Promise.all([
     getDailyCounts(),
     getDefaultSiteId(),
-    getBlockMode()
+    getBlockMode(),
+    getBlockedSites()
   ]);
   cachedDailyCounts = dailyCounts;
   currentSiteId = defaultSiteId;
   isBlockModeEnabled = blockModeEnabled;
+  blockedSitesState = blockedSites;
   const siteSelect = document.getElementById("siteSelect");
   siteSelect.value = currentSiteId;
   renderPopup();
@@ -360,6 +433,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[BLOCK_MODE_KEY]) {
     isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
+  }
+
+  if (changes[BLOCKED_SITES_KEY]) {
+    blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue);
   }
 
   renderPopup();
