@@ -2,6 +2,7 @@ const DAILY_COUNTS_KEY = "twitterDailyCounts";
 const POPUP_SITE_KEY = "twitterTrackerPopupSite";
 const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
+const BADGE_COUNT_VISIBLE_KEY = "twitterTrackerBadgeCountVisible";
 const CHART_DAYS = 14;
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -11,6 +12,7 @@ let trackedSitesState = getTrackedSites(customSitesState);
 let trackedSiteMapState = getTrackedSiteMap(customSitesState);
 let cachedDailyCounts = {};
 let isBlockModeEnabled = false;
+let isBadgeCountVisible = true;
 let blockedSitesState = normalizeBlockedSites({}, customSitesState);
 
 function refreshTrackedSitesState() {
@@ -415,6 +417,8 @@ function renderPopup() {
   renderSiteOptions();
   renderBlockedSites();
   document.getElementById("blockModeToggle").checked = isBlockModeEnabled;
+  document.getElementById("badgeCountToggle").checked = isBadgeCountVisible;
+  document.getElementById("badgeCountToggleCopy").textContent = isBadgeCountVisible ? "On" : "Off";
 
   const site = trackedSiteMapState[currentSiteId];
   if (!site) {
@@ -497,6 +501,7 @@ async function initializePopup() {
     POPUP_SITE_KEY,
     BLOCK_MODE_KEY,
     BLOCKED_SITES_KEY,
+    BADGE_COUNT_VISIBLE_KEY,
     CUSTOM_SITES_KEY
   ]);
 
@@ -505,6 +510,7 @@ async function initializePopup() {
   refreshTrackedSitesState();
   cachedDailyCounts = normalizeDailyCounts(stored[DAILY_COUNTS_KEY]);
   isBlockModeEnabled = stored[BLOCK_MODE_KEY] === true;
+  isBadgeCountVisible = stored[BADGE_COUNT_VISIBLE_KEY] !== false;
   currentSiteId = await getDefaultSiteId(stored[POPUP_SITE_KEY]);
   renderPopup();
 }
@@ -520,6 +526,9 @@ document.getElementById("resetTodayButton").addEventListener("click", resetToday
 document.getElementById("clearHistoryButton").addEventListener("click", clearHistory);
 document.getElementById("blockModeToggle").addEventListener("change", async (event) => {
   await chrome.storage.local.set({ [BLOCK_MODE_KEY]: event.target.checked });
+});
+document.getElementById("badgeCountToggle").addEventListener("change", async (event) => {
+  await chrome.storage.local.set({ [BADGE_COUNT_VISIBLE_KEY]: event.target.checked });
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -545,6 +554,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[BLOCK_MODE_KEY]) {
     isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
+  }
+
+  if (changes[BADGE_COUNT_VISIBLE_KEY]) {
+    isBadgeCountVisible = changes[BADGE_COUNT_VISIBLE_KEY].newValue !== false;
   }
 
   renderPopup();

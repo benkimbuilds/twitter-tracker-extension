@@ -1,10 +1,9 @@
 const DAILY_COUNTS_KEY = "twitterDailyCounts";
-const BADGE_POSITION_KEY = "twitterTrackerBadgePosition";
 const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
+const BADGE_COUNT_VISIBLE_KEY = "twitterTrackerBadgeCountVisible";
 const BADGE_ID = "twitter-open-tracker-badge";
 const BLOCKER_ID = "twitter-open-tracker-blocker";
-const DEFAULT_BADGE_POSITION = { top: 16, left: null, right: 16 };
 const BLOCKER_SHADOW_STYLES = `
   :host {
     color: #f7f9f9;
@@ -91,6 +90,7 @@ let trackedSiteMapState = getTrackedSiteMap(customSitesState);
 let cachedDailyCounts = {};
 let currentBadgeCount = 0;
 let isBlockModeEnabled = false;
+let isBadgeCountVisible = true;
 let blockedSitesState = normalizeBlockedSites({}, customSitesState);
 
 function isExtensionContextInvalidatedError(error) {
@@ -245,115 +245,6 @@ function getTodayKey() {
   return `${year}-${month}-${day}`;
 }
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function applyBadgePosition(badge, position = DEFAULT_BADGE_POSITION) {
-  badge.style.top = `${position.top ?? DEFAULT_BADGE_POSITION.top}px`;
-  badge.style.left = position.left == null ? "auto" : `${position.left}px`;
-  badge.style.right = position.right == null ? "auto" : `${position.right}px`;
-}
-
-async function saveBadgePosition(position) {
-  await safeStorageSet({ [BADGE_POSITION_KEY]: position });
-}
-
-async function loadBadgePosition() {
-  const stored = await safeStorageGet(BADGE_POSITION_KEY);
-  const position = stored[BADGE_POSITION_KEY];
-
-  if (!position || typeof position !== "object" || Array.isArray(position)) {
-    return DEFAULT_BADGE_POSITION;
-  }
-
-  return {
-    top: typeof position.top === "number" ? position.top : DEFAULT_BADGE_POSITION.top,
-    left: typeof position.left === "number" ? position.left : null,
-    right: typeof position.right === "number" ? position.right : null
-  };
-}
-
-function enableDragging(badge) {
-  if (badge.dataset.dragEnabled === "true") {
-    return;
-  }
-
-  badge.dataset.dragEnabled = "true";
-
-  let dragState = null;
-  let didDrag = false;
-
-  badge.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) {
-      return;
-    }
-
-    const rect = badge.getBoundingClientRect();
-    dragState = {
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      startX: event.clientX,
-      startY: event.clientY,
-      width: rect.width,
-      height: rect.height
-    };
-
-    didDrag = false;
-    badge.setPointerCapture(event.pointerId);
-    badge.classList.add("is-dragging");
-    event.preventDefault();
-  });
-
-  badge.addEventListener("pointermove", (event) => {
-    if (!dragState) {
-      return;
-    }
-
-    const movedX = Math.abs(event.clientX - dragState.startX);
-    const movedY = Math.abs(event.clientY - dragState.startY);
-    if (movedX > 4 || movedY > 4) {
-      didDrag = true;
-    }
-
-    const maxLeft = window.innerWidth - dragState.width - 8;
-    const maxTop = window.innerHeight - dragState.height - 8;
-    const left = clamp(event.clientX - dragState.offsetX, 8, Math.max(8, maxLeft));
-    const top = clamp(event.clientY - dragState.offsetY, 8, Math.max(8, maxTop));
-
-    applyBadgePosition(badge, { top, left, right: null });
-  });
-
-  async function finishDrag(event) {
-    if (!dragState) {
-      return;
-    }
-
-    const rect = badge.getBoundingClientRect();
-    const position = {
-      top: Math.round(rect.top),
-      left: Math.round(rect.left),
-      right: null
-    };
-
-    dragState = null;
-    badge.classList.remove("is-dragging");
-
-    if (event.pointerId != null && badge.hasPointerCapture(event.pointerId)) {
-      badge.releasePointerCapture(event.pointerId);
-    }
-
-    await saveBadgePosition(position);
-
-    if (!didDrag) {
-      await safeRuntimeMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
-    }
-  }
-
-  badge.addEventListener("pointerup", finishDrag);
-  badge.addEventListener("pointercancel", finishDrag);
-}
-
 function ensureBadge() {
   let badge = document.getElementById(BADGE_ID);
 
@@ -364,9 +255,11 @@ function ensureBadge() {
   badge = document.createElement("div");
   badge.id = BADGE_ID;
   badge.setAttribute("aria-live", "polite");
-  badge.title = "Drag to move";
+  badge.title = "Open tracker controls";
+  badge.addEventListener("click", async () => {
+    await safeRuntimeMessage({ type: "OPEN_TRACKER_POPUP", siteId: getCurrentSiteId() });
+  });
   document.documentElement.appendChild(badge);
-  enableDragging(badge);
   return badge;
 }
 
@@ -432,7 +325,8 @@ function renderCount(count) {
   const badge = ensureBadge();
   const siteId = getCurrentSiteId();
   const siteLabel = siteId ? (trackedSiteMapState[siteId]?.label ?? "Tracked site") : "All tracked sites";
-  badge.textContent = "👀";
+  const shouldShowVisibleCount = siteId !== null && isBadgeCountVisible;
+  badge.textContent = shouldShowVisibleCount ? `👀 ${count}` : "👀";
   badge.setAttribute("aria-label", `${siteLabel} opens today: ${count}`);
 }
 
@@ -484,10 +378,10 @@ async function initializeBadge() {
     DAILY_COUNTS_KEY,
     BLOCK_MODE_KEY,
     BLOCKED_SITES_KEY,
+    BADGE_COUNT_VISIBLE_KEY,
     CUSTOM_SITES_KEY
   ]);
-  const storedPosition = await loadBadgePosition();
-  const badge = ensureBadge();
+  ensureBadge();
 
   customSitesState = normalizeCustomSites(storedValues[CUSTOM_SITES_KEY]);
   blockedSitesState = normalizeBlockedSites(storedValues[BLOCKED_SITES_KEY], customSitesState);
@@ -495,8 +389,7 @@ async function initializeBadge() {
   cachedDailyCounts = normalizeDailyCounts(storedValues[DAILY_COUNTS_KEY]);
   currentBadgeCount = getBadgeCount(cachedDailyCounts, getCurrentSiteId());
   isBlockModeEnabled = storedValues[BLOCK_MODE_KEY] === true;
-
-  applyBadgePosition(badge, storedPosition);
+  isBadgeCountVisible = storedValues[BADGE_COUNT_VISIBLE_KEY] !== false;
   renderSurface();
 }
 
@@ -516,10 +409,6 @@ if (hasLiveExtensionContext()) {
       cachedDailyCounts = normalizeDailyCounts(changes[DAILY_COUNTS_KEY].newValue);
     }
 
-    if (changes[BADGE_POSITION_KEY]) {
-      applyBadgePosition(ensureBadge(), changes[BADGE_POSITION_KEY].newValue ?? DEFAULT_BADGE_POSITION);
-    }
-
     if (changes[BLOCK_MODE_KEY]) {
       isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
     }
@@ -528,29 +417,14 @@ if (hasLiveExtensionContext()) {
       blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue, customSitesState);
     }
 
+    if (changes[BADGE_COUNT_VISIBLE_KEY]) {
+      isBadgeCountVisible = changes[BADGE_COUNT_VISIBLE_KEY].newValue !== false;
+    }
+
     currentBadgeCount = getBadgeCount(cachedDailyCounts, getCurrentSiteId());
     renderSurface();
   });
 }
-
-window.addEventListener("resize", async () => {
-  const badge = document.getElementById(BADGE_ID);
-  if (!badge) {
-    return;
-  }
-
-  const rect = badge.getBoundingClientRect();
-  const top = clamp(rect.top, 8, Math.max(8, window.innerHeight - rect.height - 8));
-  const left = clamp(rect.left, 8, Math.max(8, window.innerWidth - rect.width - 8));
-  const position = {
-    top: Math.round(top),
-    left: Math.round(left),
-    right: null
-  };
-
-  applyBadgePosition(badge, position);
-  await saveBadgePosition(position);
-});
 
 initializeBadge().catch((error) => {
   reportContentScriptError("initialize", error);

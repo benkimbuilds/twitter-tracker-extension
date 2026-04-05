@@ -8,18 +8,54 @@
   </head>
   <body>
     <main class="popup">
-      <p class="eyebrow">Social Open Tracker</p>
-      <section class="mode-card">
-        <div>
-          <p class="metric-label">Mode</p>
-          <h2>Block tracked websites</h2>
-          <p class="label mode-label">Use the master toggle plus per-site switches to decide which tracked websites get blocked.</p>
+      <header class="panel-header">
+        <p class="eyebrow">Social Open Tracker</p>
+        <p class="panel-title">Control panel</p>
+        <p class="panel-copy">Track daily opens, tune the floating badge, and decide which sites get blocked.</p>
+      </header>
+      <div class="settings-grid">
+        <section class="mode-card">
+          <div class="mode-card-copy">
+            <p class="metric-label">Mode</p>
+            <h2>Block tracked websites</h2>
+            <p class="label mode-label">Use the master toggle plus per-site switches to decide which tracked websites get blocked.</p>
+          </div>
+          <label class="toggle" for="blockModeToggle">
+            <input id="blockModeToggle" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"></span>
+            <span class="toggle-copy">Enabled</span>
+          </label>
+        </section>
+        <section class="mode-card">
+          <div class="mode-card-copy">
+            <p class="metric-label">Floating Badge</p>
+            <h2>Show tracked-site count</h2>
+            <p class="label mode-label">Show the number on tracked sites or keep the badge as eyes-only. Non-tracked pages always stay eyes-only.</p>
+          </div>
+          <label class="toggle" for="badgeCountToggle">
+            <input id="badgeCountToggle" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"></span>
+            <span id="badgeCountToggleCopy" class="toggle-copy">On</span>
+          </label>
+        </section>
+      </div>
+      <section class="overview-card">
+        <div class="overview-top">
+          <section class="site-picker">
+            <label class="site-picker-label" for="siteSelect">Website</label>
+            <div class="site-picker-control">
+              <select id="siteSelect"></select>
+            </div>
+          </section>
+          <button id="resetTodayButton" class="secondary-button overview-action" type="button">Reset today</button>
         </div>
-        <label class="toggle" for="blockModeToggle">
-          <input id="blockModeToggle" type="checkbox">
-          <span class="toggle-track" aria-hidden="true"></span>
-          <span class="toggle-copy">Enabled</span>
-        </label>
+        <section class="hero">
+          <div>
+            <p id="todayLabel" class="metric-label">Twitter Today</p>
+            <p id="todayCount" class="hero-count">0</p>
+            <p id="todayDescription" class="label hero-description">Opens on Twitter. Resets automatically when the local day changes.</p>
+          </div>
+        </section>
       </section>
       <section class="add-site-card" aria-labelledby="addSiteTitle">
         <div class="add-site-header">
@@ -51,21 +87,6 @@
         </div>
         <div id="blockedSitesList" class="blocked-sites-list"></div>
       </section>
-      <section class="site-picker">
-        <label class="site-picker-label" for="siteSelect">Website</label>
-        <div class="site-picker-control">
-          <select id="siteSelect"></select>
-        </div>
-      </section>
-      <section class="hero">
-        <div>
-          <p id="todayLabel" class="metric-label">Twitter Today</p>
-          <h1 id="todayCount">0</h1>
-          <p id="todayDescription" class="label">Opens on Twitter. Resets automatically when the local day changes.</p>
-        </div>
-        <button id="resetTodayButton" type="button">Reset today</button>
-      </section>
-
       <section class="chart-card" aria-labelledby="historyTitle">
         <div class="chart-header">
           <div>

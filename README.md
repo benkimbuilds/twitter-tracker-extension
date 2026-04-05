@@ -2,7 +2,7 @@
 
 `Social Open Tracker` is a lightweight Chrome extension that tracks how many times you open the websites you care about, then keeps a local daily history on your machine.
 
-It adds a draggable floating counter across normal web pages and a popup with:
+It adds a floating counter across normal web pages and a popup with:
 
 - today's open count
 - a 14-day history chart
@@ -14,8 +14,9 @@ It adds a draggable floating counter across normal web pages and a popup with:
 
 - Tracks top-level visits to the built-in social sites plus any custom websites you add
 - Shows a floating badge across regular websites
+- Lets you hide or show the floating badge count from the popup
 - Can block individual tracked websites behind a blocker screen
-- Saves badge position locally after you move it
+- Pins the floating badge to the bottom-right corner on every page
 - Resets the visible count naturally by storing data per calendar day
 - Displays daily history in the extension popup
 - Stores all data in `chrome.storage.local`
@@ -33,8 +34,9 @@ It adds a draggable floating counter across normal web pages and a popup with:
 - The background service worker listens for top-level navigations to built-in sites and any custom domains you add.
 - Opens are counted into daily buckets using a local date key like `YYYY-MM-DD`.
 - Each day's data stores an aggregate total plus per-site counts.
-- The content script injects the floating badge across regular websites.
-- On tracked sites it shows that site's count for the day in the accessibility label; elsewhere it still shows the eyes badge while using the total internally.
+- The content script injects the floating badge across regular websites and keeps it pinned to the bottom-right corner.
+- The floating badge always shows the eyes icon. On tracked sites it can also show that site's live count; on non-tracked sites it stays eyes-only.
+- The popup can hide the numeric badge count on tracked sites while leaving the eyes badge and tracking behavior in place.
 - When block mode is enabled, the same content script swaps only the selected tracked sites for a local blocker overlay instead.
 - The popup reads the same local store and renders the recent chart.
 
@@ -51,13 +53,13 @@ This extension is intentionally local-first.
 Tracked data is limited to:
 
 - daily open counts
-- saved floating badge position
 - your custom tracked-site list
 - your per-site block settings
+- your badge count visibility preference
 
 ## Permissions
 
-- `storage`: saves your daily counts and badge position locally
+- `storage`: saves your daily counts and tracked-site settings locally
 - `tabs`: used when opening the popup fallback flow from the floating badge
 - `webNavigation`: counts top-level opens of tracked websites
 - `host_permissions` for regular websites: required so custom domains can be detected, counted, and blocked
