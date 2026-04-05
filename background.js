@@ -5,69 +5,28 @@ const LEGACY_COUNT_KEY = "twitterOpenCount";
 const BLOCK_MODE_KEY = "twitterTrackerBlockMode";
 const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 
-function normalizeDayEntry(entry, trackedSiteMap) {
-  if (typeof entry === "number") {
-    return {
-      total: entry,
-      sites: entry > 0 && trackedSiteMap.twitter ? { twitter: entry } : {}
-    };
-  }
-
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    return {
-      total: 0,
-      sites: {}
-    };
-  }
-
-  const sites =
-    entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
-      ? Object.fromEntries(
-          Object.entries(entry.sites)
-            .filter(([siteId, count]) => siteId in trackedSiteMap && Number.isFinite(count) && count > 0)
-            .map(([siteId, count]) => [siteId, count])
-        )
-      : {};
-  const derivedTotal = Object.values(sites).reduce((sum, count) => sum + count, 0);
-  const total = Number.isFinite(entry.total) && entry.total >= derivedTotal ? entry.total : derivedTotal;
-
-  return {
-    total,
-    sites
-  };
-}
-
-function getTodayKey() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 async function getTrackerConfig() {
-  const stored = await chrome.storage.local.get([CUSTOM_SITES_KEY, BLOCK_MODE_KEY, BLOCKED_SITES_KEY]);
+  const stored = await chrome.storage.local.get([
+    CUSTOM_SITES_KEY,
+    BLOCK_MODE_KEY,
+    BLOCKED_SITES_KEY,
+    BLOCKED_OPEN_MINUTES_KEY
+  ]);
   const customSites = normalizeCustomSites(stored[CUSTOM_SITES_KEY]);
 
   return {
     customSites,
     trackedSiteMap: getTrackedSiteMap(customSites),
     blockedSites: normalizeBlockedSites(stored[BLOCKED_SITES_KEY], customSites),
-    isBlockModeEnabled: stored[BLOCK_MODE_KEY] === true
+    isBlockModeEnabled: stored[BLOCK_MODE_KEY] === true,
+    blockedOpenMinutes: normalizeBlockedOpenMinutes(stored[BLOCKED_OPEN_MINUTES_KEY])
   };
 }
 
 async function getDailyCounts(trackedSiteMap) {
   const stored = await chrome.storage.local.get(DAILY_COUNTS_KEY);
   const dailyCounts = stored[DAILY_COUNTS_KEY];
-
-  if (!dailyCounts || typeof dailyCounts !== "object" || Array.isArray(dailyCounts)) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry, trackedSiteMap)])
-  );
+  return normalizeDailyCounts(dailyCounts, trackedSiteMap);
 }
 
 async function setDailyCounts(dailyCounts) {
@@ -79,15 +38,7 @@ async function migrateLegacyCount() {
   const stored = await chrome.storage.local.get([DAILY_COUNTS_KEY, LEGACY_COUNT_KEY]);
   const legacyCount = stored[LEGACY_COUNT_KEY];
   const existingDailyCounts = stored[DAILY_COUNTS_KEY];
-  const normalizedDailyCounts =
-    existingDailyCounts && typeof existingDailyCounts === "object" && !Array.isArray(existingDailyCounts)
-      ? Object.fromEntries(
-          Object.entries(existingDailyCounts).map(([dateKey, entry]) => [
-            dateKey,
-            normalizeDayEntry(entry, trackerConfig.trackedSiteMap)
-          ])
-        )
-      : {};
+  const normalizedDailyCounts = normalizeDailyCounts(existingDailyCounts, trackerConfig.trackedSiteMap);
 
   if (typeof legacyCount !== "number") {
     if (!existingDailyCounts) {
@@ -102,7 +53,7 @@ async function migrateLegacyCount() {
   }
 
   const todayKey = getTodayKey();
-  const todayEntry = normalizedDailyCounts[todayKey] ?? normalizeDayEntry(undefined, trackerConfig.trackedSiteMap);
+  const todayEntry = normalizedDailyCounts[todayKey] ?? createEmptyDayEntry();
   if (trackerConfig.trackedSiteMap.twitter) {
     todayEntry.total += legacyCount;
     todayEntry.sites.twitter = (todayEntry.sites.twitter ?? 0) + legacyCount;
@@ -115,12 +66,24 @@ async function migrateLegacyCount() {
   await chrome.storage.local.remove(LEGACY_COUNT_KEY);
 }
 
-async function incrementOpenCount(siteId, trackedSiteMap) {
+async function incrementVisit(siteId, trackedSiteMap, { blocked = false, savedMinutes = 0 } = {}) {
   const dailyCounts = await getDailyCounts(trackedSiteMap);
   const todayKey = getTodayKey();
-  const todayEntry = dailyCounts[todayKey] ?? normalizeDayEntry(undefined, trackedSiteMap);
-  todayEntry.total += 1;
-  todayEntry.sites[siteId] = (todayEntry.sites[siteId] ?? 0) + 1;
+  const todayEntry = dailyCounts[todayKey] ?? createEmptyDayEntry();
+
+  if (blocked) {
+    todayEntry.blockedTotal += 1;
+    todayEntry.blockedSites[siteId] = (todayEntry.blockedSites[siteId] ?? 0) + 1;
+
+    if (savedMinutes > 0) {
+      todayEntry.savedMinutes += savedMinutes;
+      todayEntry.savedSites[siteId] = (todayEntry.savedSites[siteId] ?? 0) + savedMinutes;
+    }
+  } else {
+    todayEntry.total += 1;
+    todayEntry.sites[siteId] = (todayEntry.sites[siteId] ?? 0) + 1;
+  }
+
   dailyCounts[todayKey] = todayEntry;
   await setDailyCounts(dailyCounts);
 }
@@ -145,11 +108,17 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
     return;
   }
 
-  if (trackerConfig.isBlockModeEnabled && trackerConfig.blockedSites[siteId] === true) {
+  const isBlockedVisit = trackerConfig.isBlockModeEnabled && trackerConfig.blockedSites[siteId] === true;
+
+  if (isBlockedVisit) {
+    await incrementVisit(siteId, trackerConfig.trackedSiteMap, {
+      blocked: true,
+      savedMinutes: trackerConfig.blockedOpenMinutes
+    });
     return;
   }
 
-  await incrementOpenCount(siteId, trackerConfig.trackedSiteMap);
+  await incrementVisit(siteId, trackerConfig.trackedSiteMap);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

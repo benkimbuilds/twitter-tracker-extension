@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Social Open Tracker",
+  "name": "Stay Hard",
   "version": "1.0.0",
-  "description": "Tracks daily opens across selected websites and shows a floating counter across the web.",
+  "description": "Tracks opens across selected websites, blocks distractions, and estimates time saved locally.",
   "permissions": [
     "storage",
     "tabs",
@@ -22,7 +22,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Social Open Tracker",
+    "default_title": "Stay Hard",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -31,6 +31,17 @@
     },
     "default_popup": "popup.html"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "media/stay-hard.gif"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [

@@ -1,5 +1,10 @@
 const CUSTOM_SITES_KEY = "twitterTrackerCustomSites";
+const STAY_HARD_ENABLED_KEY = "twitterTrackerStayHardEnabled";
+const BLOCKED_OPEN_MINUTES_KEY = "twitterTrackerBlockedOpenMinutes";
 const DEFAULT_SITE_ID = "twitter";
+const DEFAULT_BLOCKED_OPEN_MINUTES = 10;
+const MIN_BLOCKED_OPEN_MINUTES = 0;
+const MAX_BLOCKED_OPEN_MINUTES = 180;
 const DEFAULT_TRACKED_SITES = [
   {
     id: "linkedin",
@@ -199,5 +204,90 @@ function normalizeBlockedSites(blockedSites, customSites) {
 
   return Object.fromEntries(
     trackedSiteIds.map((siteId) => [siteId, blockedSites[siteId] !== false])
+  );
+}
+
+function getTodayKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeBlockedOpenMinutes(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_BLOCKED_OPEN_MINUTES;
+  }
+
+  return Math.min(MAX_BLOCKED_OPEN_MINUTES, Math.max(MIN_BLOCKED_OPEN_MINUTES, Math.round(value)));
+}
+
+function createEmptyDayEntry() {
+  return {
+    total: 0,
+    sites: {},
+    blockedTotal: 0,
+    blockedSites: {},
+    savedMinutes: 0,
+    savedSites: {}
+  };
+}
+
+function normalizeTrackedMetricMap(metricMap, trackedSiteMap) {
+  if (!metricMap || typeof metricMap !== "object" || Array.isArray(metricMap)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(metricMap)
+      .filter(([siteId, count]) => siteId in trackedSiteMap && Number.isFinite(count) && count > 0)
+      .map(([siteId, count]) => [siteId, Math.round(count)])
+  );
+}
+
+function normalizeDayEntry(entry, trackedSiteMap) {
+  if (typeof entry === "number") {
+    return {
+      ...createEmptyDayEntry(),
+      total: entry,
+      sites: entry > 0 && trackedSiteMap.twitter ? { twitter: entry } : {}
+    };
+  }
+
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return createEmptyDayEntry();
+  }
+
+  const sites = normalizeTrackedMetricMap(entry.sites, trackedSiteMap);
+  const blockedSites = normalizeTrackedMetricMap(entry.blockedSites, trackedSiteMap);
+  const savedSites = normalizeTrackedMetricMap(entry.savedSites, trackedSiteMap);
+  const derivedTotal = Object.values(sites).reduce((sum, count) => sum + count, 0);
+  const derivedBlockedTotal = Object.values(blockedSites).reduce((sum, count) => sum + count, 0);
+  const derivedSavedMinutes = Object.values(savedSites).reduce((sum, minutes) => sum + minutes, 0);
+
+  return {
+    total: Number.isFinite(entry.total) && entry.total >= derivedTotal ? Math.round(entry.total) : derivedTotal,
+    sites,
+    blockedTotal:
+      Number.isFinite(entry.blockedTotal) && entry.blockedTotal >= derivedBlockedTotal
+        ? Math.round(entry.blockedTotal)
+        : derivedBlockedTotal,
+    blockedSites,
+    savedMinutes:
+      Number.isFinite(entry.savedMinutes) && entry.savedMinutes >= derivedSavedMinutes
+        ? Math.round(entry.savedMinutes)
+        : derivedSavedMinutes,
+    savedSites
+  };
+}
+
+function normalizeDailyCounts(dailyCounts, trackedSiteMap) {
+  if (!dailyCounts || typeof dailyCounts !== "object" || Array.isArray(dailyCounts)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry, trackedSiteMap)])
   );
 }

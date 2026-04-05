@@ -5,6 +5,11 @@ const BLOCKED_SITES_KEY = "twitterTrackerBlockedSites";
 const BADGE_COUNT_VISIBLE_KEY = "twitterTrackerBadgeCountVisible";
 const CHART_DAYS = 14;
 const SVG_NS = "http://www.w3.org/2000/svg";
+const DAY_METRIC_CONFIG = {
+  sites: "total",
+  blockedSites: "blockedTotal",
+  savedSites: "savedMinutes"
+};
 
 let currentSiteId = getFallbackSiteId([]);
 let customSitesState = [];
@@ -12,7 +17,9 @@ let trackedSitesState = getTrackedSites(customSitesState);
 let trackedSiteMapState = getTrackedSiteMap(customSitesState);
 let cachedDailyCounts = {};
 let isBlockModeEnabled = false;
+let isStayHardEnabled = false;
 let isBadgeCountVisible = true;
+let blockedOpenMinutesState = DEFAULT_BLOCKED_OPEN_MINUTES;
 let blockedSitesState = normalizeBlockedSites({}, customSitesState);
 
 function refreshTrackedSitesState() {
@@ -23,14 +30,6 @@ function refreshTrackedSitesState() {
   if (!currentSiteId || !(currentSiteId in trackedSiteMapState)) {
     currentSiteId = getFallbackSiteId(customSitesState);
   }
-}
-
-function getTodayKey() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function getDateKeyForOffset(offset) {
@@ -52,70 +51,71 @@ function formatLabel(dateKey) {
   });
 }
 
-function emptyDayEntry() {
-  return {
-    total: 0,
-    sites: {}
-  };
+function formatMinutesSaved(minutes) {
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+
+  if (remainder === 0) {
+    return `${hours}h`;
+  }
+
+  return `${hours}h ${remainder}m`;
 }
 
-function normalizeDayEntry(entry) {
-  if (typeof entry === "number") {
-    return {
-      total: entry,
-      sites: entry > 0 && trackedSiteMapState.twitter ? { twitter: entry } : {}
-    };
-  }
-
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    return emptyDayEntry();
-  }
-
-  const sites =
-    entry.sites && typeof entry.sites === "object" && !Array.isArray(entry.sites)
-      ? Object.fromEntries(
-          Object.entries(entry.sites)
-            .filter(([siteId, count]) => siteId in trackedSiteMapState && Number.isFinite(count) && count > 0)
-            .map(([siteId, count]) => [siteId, count])
-        )
-      : {};
-  const derivedTotal = Object.values(sites).reduce((sum, count) => sum + count, 0);
-  const total = Number.isFinite(entry.total) && entry.total >= derivedTotal ? entry.total : derivedTotal;
-
-  return {
-    total,
-    sites
-  };
+function getNormalizedDayEntry(entry) {
+  return normalizeDayEntry(entry, trackedSiteMapState);
 }
 
-function normalizeDailyCounts(dailyCounts) {
-  if (!dailyCounts || typeof dailyCounts !== "object" || Array.isArray(dailyCounts)) {
-    return {};
-  }
+function getNormalizedDailyCounts(dailyCounts) {
+  return normalizeDailyCounts(dailyCounts, trackedSiteMapState);
+}
 
-  return Object.fromEntries(
-    Object.entries(dailyCounts).map(([dateKey, entry]) => [dateKey, normalizeDayEntry(entry)])
+function isDayEntryEmpty(dayEntry) {
+  return (
+    dayEntry.total === 0 &&
+    dayEntry.blockedTotal === 0 &&
+    dayEntry.savedMinutes === 0 &&
+    Object.keys(dayEntry.sites).length === 0 &&
+    Object.keys(dayEntry.blockedSites).length === 0 &&
+    Object.keys(dayEntry.savedSites).length === 0
   );
 }
 
-function getSiteCountForDate(dailyCounts, dateKey, siteId) {
-  return normalizeDayEntry(dailyCounts[dateKey]).sites[siteId] ?? 0;
+function getSiteMetricForDate(dailyCounts, dateKey, siteId, metricKey) {
+  return getNormalizedDayEntry(dailyCounts[dateKey])[metricKey][siteId] ?? 0;
 }
 
-function setSiteCountForDate(dailyCounts, dateKey, siteId, nextCount) {
-  const dayEntry = normalizeDayEntry(dailyCounts[dateKey]);
-  const previousCount = dayEntry.sites[siteId] ?? 0;
-  const safeCount = Math.max(0, Math.round(nextCount));
+function getSiteCountForDate(dailyCounts, dateKey, siteId) {
+  return getSiteMetricForDate(dailyCounts, dateKey, siteId, "sites");
+}
 
-  if (safeCount > 0) {
-    dayEntry.sites[siteId] = safeCount;
+function getBlockedCountForDate(dailyCounts, dateKey, siteId) {
+  return getSiteMetricForDate(dailyCounts, dateKey, siteId, "blockedSites");
+}
+
+function getSavedMinutesForDate(dailyCounts, dateKey, siteId) {
+  return getSiteMetricForDate(dailyCounts, dateKey, siteId, "savedSites");
+}
+
+function setSiteMetricForDate(dailyCounts, dateKey, siteId, metricKey, nextValue) {
+  const dayEntry = getNormalizedDayEntry(dailyCounts[dateKey]);
+  const totalKey = DAY_METRIC_CONFIG[metricKey];
+  const previousValue = dayEntry[metricKey][siteId] ?? 0;
+  const safeValue = Math.max(0, Math.round(nextValue));
+
+  if (safeValue > 0) {
+    dayEntry[metricKey][siteId] = safeValue;
   } else {
-    delete dayEntry.sites[siteId];
+    delete dayEntry[metricKey][siteId];
   }
 
-  dayEntry.total = Math.max(0, dayEntry.total - previousCount + safeCount);
+  dayEntry[totalKey] = Math.max(0, dayEntry[totalKey] - previousValue + safeValue);
 
-  if (dayEntry.total === 0 && Object.keys(dayEntry.sites).length === 0) {
+  if (isDayEntryEmpty(dayEntry)) {
     delete dailyCounts[dateKey];
     return;
   }
@@ -124,20 +124,23 @@ function setSiteCountForDate(dailyCounts, dateKey, siteId, nextCount) {
 }
 
 function removeSiteFromDailyCounts(dailyCounts, siteId) {
-  const nextDailyCounts = normalizeDailyCounts(dailyCounts);
+  const nextDailyCounts = getNormalizedDailyCounts(dailyCounts);
 
   Object.keys(nextDailyCounts).forEach((dateKey) => {
-    const dayEntry = normalizeDayEntry(nextDailyCounts[dateKey]);
-    const previousCount = dayEntry.sites[siteId] ?? 0;
+    const dayEntry = getNormalizedDayEntry(nextDailyCounts[dateKey]);
 
-    if (previousCount === 0) {
-      return;
-    }
+    Object.entries(DAY_METRIC_CONFIG).forEach(([metricKey, totalKey]) => {
+      const previousValue = dayEntry[metricKey][siteId] ?? 0;
 
-    delete dayEntry.sites[siteId];
-    dayEntry.total = Math.max(0, dayEntry.total - previousCount);
+      if (previousValue === 0) {
+        return;
+      }
 
-    if (dayEntry.total === 0 && Object.keys(dayEntry.sites).length === 0) {
+      delete dayEntry[metricKey][siteId];
+      dayEntry[totalKey] = Math.max(0, dayEntry[totalKey] - previousValue);
+    });
+
+    if (isDayEntryEmpty(dayEntry)) {
       delete nextDailyCounts[dateKey];
       return;
     }
@@ -154,9 +157,24 @@ function getChartData(dailyCounts, siteId) {
     const dateKey = getDateKeyForOffset(offset);
     return {
       dateKey,
-      count: getSiteCountForDate(dailyCounts, dateKey, siteId)
+      count: getSiteCountForDate(dailyCounts, dateKey, siteId),
+      blockedCount: getBlockedCountForDate(dailyCounts, dateKey, siteId)
     };
   });
+}
+
+function getAccumulatedSiteMetric(dailyCounts, siteId, metricKey) {
+  return Object.keys(dailyCounts).reduce(
+    (sum, dateKey) => sum + getSiteMetricForDate(dailyCounts, dateKey, siteId, metricKey),
+    0
+  );
+}
+
+function getAccumulatedTotal(dailyCounts, totalKey) {
+  return Object.keys(dailyCounts).reduce(
+    (sum, dateKey) => sum + getNormalizedDayEntry(dailyCounts[dateKey])[totalKey],
+    0
+  );
 }
 
 function clearChart() {
@@ -179,7 +197,7 @@ function appendSvgElement(parent, tagName, attributes) {
 function renderChart(dailyCounts, siteId) {
   const chart = clearChart();
   const data = getChartData(dailyCounts, siteId);
-  const values = data.map((entry) => entry.count);
+  const values = data.flatMap((entry) => [entry.count, entry.blockedCount]);
   const maxValue = Math.max(...values, 1);
   const width = 320;
   const height = 180;
@@ -220,14 +238,19 @@ function renderChart(dailyCounts, siteId) {
     }).textContent = String(value);
   });
 
-  const points = data.map((entry, index) => {
+  const openPoints = data.map((entry, index) => {
     const x = padding.left + (innerWidth / (data.length - 1)) * index;
     const y = padding.top + innerHeight - (entry.count / maxValue) * innerHeight;
     return { x, y, count: entry.count };
   });
+  const blockedPoints = data.map((entry, index) => {
+    const x = padding.left + (innerWidth / (data.length - 1)) * index;
+    const y = padding.top + innerHeight - (entry.blockedCount / maxValue) * innerHeight;
+    return { x, y, count: entry.blockedCount };
+  });
 
   appendSvgElement(chart, "polyline", {
-    points: points.map(({ x, y }) => `${x},${y}`).join(" "),
+    points: openPoints.map(({ x, y }) => `${x},${y}`).join(" "),
     fill: "none",
     stroke: "#1d9bf0",
     "stroke-width": "3",
@@ -235,7 +258,16 @@ function renderChart(dailyCounts, siteId) {
     "stroke-linejoin": "round"
   });
 
-  points.forEach(({ x, y, count }) => {
+  appendSvgElement(chart, "polyline", {
+    points: blockedPoints.map(({ x, y }) => `${x},${y}`).join(" "),
+    fill: "none",
+    stroke: "#ff8b3d",
+    "stroke-width": "3",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round"
+  });
+
+  openPoints.forEach(({ x, y, count }) => {
     appendSvgElement(chart, "circle", {
       cx: x,
       cy: y,
@@ -244,6 +276,17 @@ function renderChart(dailyCounts, siteId) {
       stroke: "#86cbff",
       "stroke-width": "2"
     }).appendChild(document.createElementNS(SVG_NS, "title")).textContent = `${count} opens`;
+  });
+
+  blockedPoints.forEach(({ x, y, count }) => {
+    appendSvgElement(chart, "circle", {
+      cx: x,
+      cy: y,
+      r: 4,
+      fill: "#0f1419",
+      stroke: "#ffc28d",
+      "stroke-width": "2"
+    }).appendChild(document.createElementNS(SVG_NS, "title")).textContent = `${count} blocked`;
   });
 
   document.getElementById("startLabel").textContent = formatLabel(data[0].dateKey);
@@ -417,6 +460,9 @@ function renderPopup() {
   renderSiteOptions();
   renderBlockedSites();
   document.getElementById("blockModeToggle").checked = isBlockModeEnabled;
+  document.getElementById("stayHardToggle").checked = isStayHardEnabled;
+  document.getElementById("stayHardToggleCopy").textContent = isStayHardEnabled ? "On" : "Off";
+  document.getElementById("blockedOpenMinutesInput").value = String(blockedOpenMinutesState);
   document.getElementById("badgeCountToggle").checked = isBadgeCountVisible;
   document.getElementById("badgeCountToggleCopy").textContent = isBadgeCountVisible ? "On" : "Off";
 
@@ -425,27 +471,42 @@ function renderPopup() {
     return;
   }
 
+  const todayKey = getTodayKey();
+  const siteOpensToday = getSiteCountForDate(cachedDailyCounts, todayKey, currentSiteId);
+  const blockedTodayCount = getBlockedCountForDate(cachedDailyCounts, todayKey, currentSiteId);
+  const timeSavedToday = getSavedMinutesForDate(cachedDailyCounts, todayKey, currentSiteId);
+  const siteTimeSavedTotal = getAccumulatedSiteMetric(cachedDailyCounts, currentSiteId, "savedSites");
+  const allTimeSavedTotal = getAccumulatedTotal(cachedDailyCounts, "savedMinutes");
+
   document.getElementById("todayLabel").textContent = `${site.label} today`;
-  document.getElementById("todayCount").textContent = String(
-    getSiteCountForDate(cachedDailyCounts, getTodayKey(), currentSiteId)
-  );
+  document.getElementById("todayCount").textContent = String(siteOpensToday);
   document.getElementById("todayDescription").textContent =
-    `Opens on ${site.label}. Resets automatically when the local day changes.`;
+    `${site.label} opened ${siteOpensToday} times, blocked ${blockedTodayCount} times, and saved about ${formatMinutesSaved(timeSavedToday)} today.`;
+  document.getElementById("blockedTodayCount").textContent = String(blockedTodayCount);
+  document.getElementById("timeSavedToday").textContent = formatMinutesSaved(timeSavedToday);
+  document.getElementById("siteTimeSavedTotal").textContent = formatMinutesSaved(siteTimeSavedTotal);
+  document.getElementById("allTimeSavedTotal").textContent = formatMinutesSaved(allTimeSavedTotal);
   document.getElementById("historyTitle").textContent = `Last 14 days on ${site.label}`;
-  document.getElementById("historyChart").setAttribute("aria-label", `Line chart of daily ${site.label} opens`);
+  document
+    .getElementById("historyChart")
+    .setAttribute("aria-label", `Line chart of daily ${site.label} opens and blocked visits`);
   renderChart(cachedDailyCounts, currentSiteId);
 }
 
 async function resetToday() {
-  const nextDailyCounts = normalizeDailyCounts(cachedDailyCounts);
-  setSiteCountForDate(nextDailyCounts, getTodayKey(), currentSiteId, 0);
+  const nextDailyCounts = getNormalizedDailyCounts(cachedDailyCounts);
+  setSiteMetricForDate(nextDailyCounts, getTodayKey(), currentSiteId, "sites", 0);
+  setSiteMetricForDate(nextDailyCounts, getTodayKey(), currentSiteId, "blockedSites", 0);
+  setSiteMetricForDate(nextDailyCounts, getTodayKey(), currentSiteId, "savedSites", 0);
   await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: nextDailyCounts });
 }
 
 async function clearHistory() {
-  const nextDailyCounts = normalizeDailyCounts(cachedDailyCounts);
+  const nextDailyCounts = getNormalizedDailyCounts(cachedDailyCounts);
   Object.keys(nextDailyCounts).forEach((dateKey) => {
-    setSiteCountForDate(nextDailyCounts, dateKey, currentSiteId, 0);
+    setSiteMetricForDate(nextDailyCounts, dateKey, currentSiteId, "sites", 0);
+    setSiteMetricForDate(nextDailyCounts, dateKey, currentSiteId, "blockedSites", 0);
+    setSiteMetricForDate(nextDailyCounts, dateKey, currentSiteId, "savedSites", 0);
   });
   await chrome.storage.local.set({ [DAILY_COUNTS_KEY]: nextDailyCounts });
 }
@@ -502,15 +563,19 @@ async function initializePopup() {
     BLOCK_MODE_KEY,
     BLOCKED_SITES_KEY,
     BADGE_COUNT_VISIBLE_KEY,
-    CUSTOM_SITES_KEY
+    CUSTOM_SITES_KEY,
+    STAY_HARD_ENABLED_KEY,
+    BLOCKED_OPEN_MINUTES_KEY
   ]);
 
   customSitesState = normalizeCustomSites(stored[CUSTOM_SITES_KEY]);
   blockedSitesState = normalizeBlockedSites(stored[BLOCKED_SITES_KEY], customSitesState);
   refreshTrackedSitesState();
-  cachedDailyCounts = normalizeDailyCounts(stored[DAILY_COUNTS_KEY]);
+  cachedDailyCounts = getNormalizedDailyCounts(stored[DAILY_COUNTS_KEY]);
   isBlockModeEnabled = stored[BLOCK_MODE_KEY] === true;
+  isStayHardEnabled = stored[STAY_HARD_ENABLED_KEY] === true;
   isBadgeCountVisible = stored[BADGE_COUNT_VISIBLE_KEY] !== false;
+  blockedOpenMinutesState = normalizeBlockedOpenMinutes(stored[BLOCKED_OPEN_MINUTES_KEY]);
   currentSiteId = await getDefaultSiteId(stored[POPUP_SITE_KEY]);
   renderPopup();
 }
@@ -526,6 +591,14 @@ document.getElementById("resetTodayButton").addEventListener("click", resetToday
 document.getElementById("clearHistoryButton").addEventListener("click", clearHistory);
 document.getElementById("blockModeToggle").addEventListener("change", async (event) => {
   await chrome.storage.local.set({ [BLOCK_MODE_KEY]: event.target.checked });
+});
+document.getElementById("stayHardToggle").addEventListener("change", async (event) => {
+  await chrome.storage.local.set({ [STAY_HARD_ENABLED_KEY]: event.target.checked });
+});
+document.getElementById("blockedOpenMinutesInput").addEventListener("change", async (event) => {
+  const nextValue = normalizeBlockedOpenMinutes(Number(event.target.value));
+  event.target.value = String(nextValue);
+  await chrome.storage.local.set({ [BLOCKED_OPEN_MINUTES_KEY]: nextValue });
 });
 document.getElementById("badgeCountToggle").addEventListener("change", async (event) => {
   await chrome.storage.local.set({ [BADGE_COUNT_VISIBLE_KEY]: event.target.checked });
@@ -545,7 +618,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes[DAILY_COUNTS_KEY]) {
-    cachedDailyCounts = normalizeDailyCounts(changes[DAILY_COUNTS_KEY].newValue);
+    cachedDailyCounts = getNormalizedDailyCounts(changes[DAILY_COUNTS_KEY].newValue);
   }
 
   if (changes[POPUP_SITE_KEY] && changes[POPUP_SITE_KEY].newValue in getTrackedSiteMap(customSitesState)) {
@@ -554,6 +627,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[BLOCK_MODE_KEY]) {
     isBlockModeEnabled = changes[BLOCK_MODE_KEY].newValue === true;
+  }
+
+  if (changes[STAY_HARD_ENABLED_KEY]) {
+    isStayHardEnabled = changes[STAY_HARD_ENABLED_KEY].newValue === true;
+  }
+
+  if (changes[BLOCKED_OPEN_MINUTES_KEY]) {
+    blockedOpenMinutesState = normalizeBlockedOpenMinutes(changes[BLOCKED_OPEN_MINUTES_KEY].newValue);
   }
 
   if (changes[BADGE_COUNT_VISIBLE_KEY]) {

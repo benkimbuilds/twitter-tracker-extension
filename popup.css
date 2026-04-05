@@ -6,9 +6,10 @@
 
 body {
   margin: 0;
-  min-width: 380px;
+  min-width: 400px;
   background:
-    radial-gradient(circle at top, rgba(29, 155, 240, 0.18), transparent 34%),
+    radial-gradient(circle at top, rgba(255, 107, 53, 0.18), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(29, 155, 240, 0.14), transparent 28%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
     #0f1419;
   color: #f7f9f9;
@@ -65,6 +66,12 @@ body {
   justify-content: space-between;
   gap: 14px;
   padding: 16px;
+}
+
+.mode-card-controls {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
 }
 
 .mode-card-copy {
@@ -273,7 +280,29 @@ body {
 }
 
 .hero {
+  display: grid;
+  gap: 14px;
   min-width: 0;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hero-stat {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hero-stat-value {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 
 .metric-label {
@@ -322,6 +351,36 @@ h2 {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #8b98a5;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-legend-swatch {
+  width: 18px;
+  height: 4px;
+  border-radius: 999px;
+}
+
+.chart-legend-swatch--opens {
+  background: #1d9bf0;
+}
+
+.chart-legend-swatch--blocked {
+  background: #ff8b3d;
 }
 
 #historyChart {
@@ -382,6 +441,39 @@ button:hover {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+}
+
+.minutes-field {
+  display: grid;
+  gap: 8px;
+  min-width: 164px;
+}
+
+.minutes-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8b98a5;
+  text-align: right;
+}
+
+#blockedOpenMinutesInput {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f7f9f9;
+  font: inherit;
+  font-size: 14px;
+  text-align: right;
+}
+
+#blockedOpenMinutesInput:focus {
+  outline: none;
+  border-color: rgba(255, 139, 61, 0.72);
+  box-shadow: 0 0 0 1px rgba(255, 139, 61, 0.32);
 }
 
 .toggle input {

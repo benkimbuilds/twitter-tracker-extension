@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Social Open Tracker</title>
+    <title>Stay Hard</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <main class="popup">
       <header class="panel-header">
-        <p class="eyebrow">Social Open Tracker</p>
+        <p class="eyebrow">Stay Hard</p>
         <p class="panel-title">Control panel</p>
-        <p class="panel-copy">Track daily opens, tune the floating badge, and decide which sites get blocked.</p>
+        <p class="panel-copy">Track opens, shut down distractions, and see how much time blocked detours saved you.</p>
       </header>
       <div class="settings-grid">
         <section class="mode-card">
@@ -25,6 +25,24 @@
             <span class="toggle-track" aria-hidden="true"></span>
             <span class="toggle-copy">Enabled</span>
           </label>
+        </section>
+        <section class="mode-card">
+          <div class="mode-card-copy">
+            <p class="metric-label">Stay Hard</p>
+            <h2>David Goggins blocker</h2>
+            <p class="label mode-label">Show the stay hard GIF on blocked pages and set how many minutes each blocked detour saves.</p>
+          </div>
+          <div class="mode-card-controls">
+            <label class="toggle" for="stayHardToggle">
+              <input id="stayHardToggle" type="checkbox">
+              <span class="toggle-track" aria-hidden="true"></span>
+              <span id="stayHardToggleCopy" class="toggle-copy">Off</span>
+            </label>
+            <label class="minutes-field" for="blockedOpenMinutesInput">
+              <span class="minutes-field-label">Minutes saved per blocked open</span>
+              <input id="blockedOpenMinutesInput" type="number" min="0" max="180" step="1">
+            </label>
+          </div>
         </section>
         <section class="mode-card">
           <div class="mode-card-copy">
@@ -54,6 +72,24 @@
             <p id="todayLabel" class="metric-label">Twitter Today</p>
             <p id="todayCount" class="hero-count">0</p>
             <p id="todayDescription" class="label hero-description">Opens on Twitter. Resets automatically when the local day changes.</p>
+          </div>
+          <div class="hero-stats">
+            <article class="hero-stat">
+              <p class="metric-label">Blocked Today</p>
+              <p id="blockedTodayCount" class="hero-stat-value">0</p>
+            </article>
+            <article class="hero-stat">
+              <p class="metric-label">Saved Today</p>
+              <p id="timeSavedToday" class="hero-stat-value">0m</p>
+            </article>
+            <article class="hero-stat">
+              <p class="metric-label">Site Saved</p>
+              <p id="siteTimeSavedTotal" class="hero-stat-value">0m</p>
+            </article>
+            <article class="hero-stat">
+              <p class="metric-label">All Saved</p>
+              <p id="allTimeSavedTotal" class="hero-stat-value">0m</p>
+            </article>
           </div>
         </section>
       </section>
@@ -94,6 +130,10 @@
             <h2 id="historyTitle">Last 14 days on Twitter</h2>
           </div>
           <button id="clearHistoryButton" class="secondary-button" type="button">Clear site history</button>
+        </div>
+        <div class="chart-legend" aria-hidden="true">
+          <span class="chart-legend-item"><span class="chart-legend-swatch chart-legend-swatch--opens"></span>Opens</span>
+          <span class="chart-legend-item"><span class="chart-legend-swatch chart-legend-swatch--blocked"></span>Blocked</span>
         </div>
         <svg id="historyChart" viewBox="0 0 320 180" role="img" aria-label="Line chart of daily Twitter opens"></svg>
         <div class="chart-labels">
