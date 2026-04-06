@@ -8,6 +8,8 @@ It adds a floating counter across normal web pages and a popup with:
 - today's blocked count and estimated time saved
 - a 14-day history chart
 - an optional block mode with per-site blocking controls
+- per-site block timers for temporary focus windows
+- optional per-site browser-history exclusion for tracked sites
 - an optional stay-hard blocker with a bundled GIF
 - custom website tracking you can add yourself
 - local-only storage with no backend or account sync
@@ -18,6 +20,8 @@ It adds a floating counter across normal web pages and a popup with:
 - Shows a floating badge across regular websites
 - Lets you hide or show the floating badge count from the popup
 - Can block individual tracked websites behind a blocker screen or stay-hard GIF
+- Can temporarily block a selected site for a fixed timer window
+- Can remove new history entries for selected tracked sites from Chrome history
 - Pins the floating badge to the bottom-right corner on every page
 - Resets the visible count naturally by storing data per calendar day
 - Displays daily history for opens and blocked visits in the extension popup
@@ -40,7 +44,9 @@ It adds a floating counter across normal web pages and a popup with:
 - The floating badge always shows the eyes icon. On tracked sites it can also show that site's live count; on non-tracked sites it stays eyes-only.
 - The popup can hide the numeric badge count on tracked sites while leaving the eyes badge and tracking behavior in place.
 - When block mode is enabled, the same content script swaps only the selected tracked sites for a local blocker overlay instead.
+- A site timer can block one tracked site until its countdown expires, even if master block mode is off.
 - Stay hard mode swaps that blocker for a bundled `stay-hard.gif` and applies the configured minutes-saved estimate for each blocked visit.
+- If you turn browser history off for a tracked site, the background worker removes new matching history entries locally after they are recorded.
 - The popup reads the same local store and renders the recent chart.
 
 ## Privacy
@@ -59,12 +65,15 @@ Tracked data is limited to:
 - daily blocked counts and estimated saved minutes
 - your custom tracked-site list
 - your per-site block settings
+- your per-site block timers
+- your per-site browser-history exclusion settings
 - your stay-hard mode and minutes-saved preference
 - your badge count visibility preference
 
 ## Permissions
 
 - `storage`: saves your daily counts and tracked-site settings locally
+- `history`: removes new history entries for sites you explicitly mark as history-off
 - `tabs`: used when opening the popup fallback flow from the floating badge
 - `webNavigation`: counts top-level opens of tracked websites
 - `host_permissions` for regular websites: required so custom domains can be detected, counted, and blocked

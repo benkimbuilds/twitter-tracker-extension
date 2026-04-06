@@ -1,10 +1,15 @@
 const CUSTOM_SITES_KEY = "twitterTrackerCustomSites";
 const STAY_HARD_ENABLED_KEY = "twitterTrackerStayHardEnabled";
 const BLOCKED_OPEN_MINUTES_KEY = "twitterTrackerBlockedOpenMinutes";
+const TIMED_BLOCKS_KEY = "twitterTrackerTimedBlocks";
+const HISTORY_EXCLUDED_SITES_KEY = "twitterTrackerHistoryExcludedSites";
 const DEFAULT_SITE_ID = "twitter";
 const DEFAULT_BLOCKED_OPEN_MINUTES = 10;
 const MIN_BLOCKED_OPEN_MINUTES = 0;
 const MAX_BLOCKED_OPEN_MINUTES = 180;
+const DEFAULT_BLOCK_TIMER_MINUTES = 30;
+const MIN_BLOCK_TIMER_MINUTES = 1;
+const MAX_BLOCK_TIMER_MINUTES = 1440;
 const DEFAULT_TRACKED_SITES = [
   {
     id: "linkedin",
@@ -207,6 +212,18 @@ function normalizeBlockedSites(blockedSites, customSites) {
   );
 }
 
+function normalizeHistoryExcludedSites(historyExcludedSites, customSites) {
+  const trackedSiteIds = getTrackedSiteIds(customSites);
+
+  if (!historyExcludedSites || typeof historyExcludedSites !== "object" || Array.isArray(historyExcludedSites)) {
+    return Object.fromEntries(trackedSiteIds.map((siteId) => [siteId, false]));
+  }
+
+  return Object.fromEntries(
+    trackedSiteIds.map((siteId) => [siteId, historyExcludedSites[siteId] === true])
+  );
+}
+
 function getTodayKey() {
   const now = new Date();
   const year = now.getFullYear();
@@ -221,6 +238,78 @@ function normalizeBlockedOpenMinutes(value) {
   }
 
   return Math.min(MAX_BLOCKED_OPEN_MINUTES, Math.max(MIN_BLOCKED_OPEN_MINUTES, Math.round(value)));
+}
+
+function normalizeBlockTimerMinutes(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_BLOCK_TIMER_MINUTES;
+  }
+
+  return Math.min(MAX_BLOCK_TIMER_MINUTES, Math.max(MIN_BLOCK_TIMER_MINUTES, Math.round(value)));
+}
+
+function normalizeTimedBlocks(timedBlocks, customSites, now = Date.now()) {
+  const trackedSiteMap = getTrackedSiteMap(customSites);
+
+  if (!timedBlocks || typeof timedBlocks !== "object" || Array.isArray(timedBlocks)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(timedBlocks)
+      .filter(
+        ([siteId, expiresAt]) =>
+          siteId in trackedSiteMap && Number.isFinite(expiresAt) && Math.round(expiresAt) > now
+      )
+      .map(([siteId, expiresAt]) => [siteId, Math.round(expiresAt)])
+  );
+}
+
+function getTimedBlockExpiry(siteId, timedBlocks, now = Date.now()) {
+  if (!siteId || !timedBlocks || typeof timedBlocks !== "object" || Array.isArray(timedBlocks)) {
+    return null;
+  }
+
+  const expiresAt = timedBlocks[siteId];
+  if (!Number.isFinite(expiresAt)) {
+    return null;
+  }
+
+  const roundedExpiry = Math.round(expiresAt);
+  return roundedExpiry > now ? roundedExpiry : null;
+}
+
+function getRemainingMinutesUntil(timestamp, now = Date.now()) {
+  if (!Number.isFinite(timestamp)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.ceil((timestamp - now) / 60000));
+}
+
+function getSiteBlockState(
+  siteId,
+  { isBlockModeEnabled = false, blockedSites = {}, timedBlocks = {}, now = Date.now() } = {}
+) {
+  const timedBlockExpiresAt = getTimedBlockExpiry(siteId, timedBlocks, now);
+
+  if (timedBlockExpiresAt) {
+    return {
+      isBlocked: true,
+      reason: "timer",
+      timedBlockExpiresAt,
+      remainingMinutes: getRemainingMinutesUntil(timedBlockExpiresAt, now)
+    };
+  }
+
+  const isBlockedByMode = Boolean(siteId) && isBlockModeEnabled && blockedSites[siteId] === true;
+
+  return {
+    isBlocked: isBlockedByMode,
+    reason: isBlockedByMode ? "mode" : null,
+    timedBlockExpiresAt: null,
+    remainingMinutes: 0
+  };
 }
 
 function createEmptyDayEntry() {

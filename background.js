@@ -10,16 +10,30 @@ async function getTrackerConfig() {
     CUSTOM_SITES_KEY,
     BLOCK_MODE_KEY,
     BLOCKED_SITES_KEY,
-    BLOCKED_OPEN_MINUTES_KEY
+    BLOCKED_OPEN_MINUTES_KEY,
+    TIMED_BLOCKS_KEY,
+    HISTORY_EXCLUDED_SITES_KEY
   ]);
   const customSites = normalizeCustomSites(stored[CUSTOM_SITES_KEY]);
+  const timedBlocks = normalizeTimedBlocks(stored[TIMED_BLOCKS_KEY], customSites);
+  const historyExcludedSites = normalizeHistoryExcludedSites(stored[HISTORY_EXCLUDED_SITES_KEY], customSites);
+
+  if (JSON.stringify(stored[TIMED_BLOCKS_KEY] ?? {}) !== JSON.stringify(timedBlocks)) {
+    await chrome.storage.local.set({ [TIMED_BLOCKS_KEY]: timedBlocks });
+  }
+
+  if (JSON.stringify(stored[HISTORY_EXCLUDED_SITES_KEY] ?? {}) !== JSON.stringify(historyExcludedSites)) {
+    await chrome.storage.local.set({ [HISTORY_EXCLUDED_SITES_KEY]: historyExcludedSites });
+  }
 
   return {
     customSites,
     trackedSiteMap: getTrackedSiteMap(customSites),
     blockedSites: normalizeBlockedSites(stored[BLOCKED_SITES_KEY], customSites),
     isBlockModeEnabled: stored[BLOCK_MODE_KEY] === true,
-    blockedOpenMinutes: normalizeBlockedOpenMinutes(stored[BLOCKED_OPEN_MINUTES_KEY])
+    blockedOpenMinutes: normalizeBlockedOpenMinutes(stored[BLOCKED_OPEN_MINUTES_KEY]),
+    timedBlocks,
+    historyExcludedSites
   };
 }
 
@@ -108,9 +122,13 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
     return;
   }
 
-  const isBlockedVisit = trackerConfig.isBlockModeEnabled && trackerConfig.blockedSites[siteId] === true;
+  const blockState = getSiteBlockState(siteId, {
+    isBlockModeEnabled: trackerConfig.isBlockModeEnabled,
+    blockedSites: trackerConfig.blockedSites,
+    timedBlocks: trackerConfig.timedBlocks
+  });
 
-  if (isBlockedVisit) {
+  if (blockState.isBlocked) {
     await incrementVisit(siteId, trackerConfig.trackedSiteMap, {
       blocked: true,
       savedMinutes: trackerConfig.blockedOpenMinutes
@@ -119,6 +137,27 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
   }
 
   await incrementVisit(siteId, trackerConfig.trackedSiteMap);
+});
+
+chrome.history.onVisited.addListener(async (historyItem) => {
+  const url = historyItem?.url;
+
+  if (!url) {
+    return;
+  }
+
+  const trackerConfig = await getTrackerConfig();
+  const siteId = findTrackedSiteIdByUrl(url, trackerConfig.customSites);
+
+  if (!siteId || trackerConfig.historyExcludedSites[siteId] !== true) {
+    return;
+  }
+
+  try {
+    await chrome.history.deleteUrl({ url });
+  } catch {
+    // Ignore history removal failures for transient or browser-managed entries.
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

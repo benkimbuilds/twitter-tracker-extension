@@ -62,6 +62,39 @@ const BLOCKER_SHADOW_STYLES = `
     font-weight: 400;
   }
 
+  .twitter-open-tracker-blocker__timer {
+    display: grid;
+    gap: 6px;
+    align-self: center;
+    justify-items: center;
+    text-align: center;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 194, 141, 0.22);
+    border-radius: 18px;
+    background: rgba(255, 194, 141, 0.08);
+  }
+
+  .twitter-open-tracker-blocker__timer[hidden] {
+    display: none;
+  }
+
+  .twitter-open-tracker-blocker__timer-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 194, 141, 0.78);
+  }
+
+  .twitter-open-tracker-blocker__timer-value {
+    font-family: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: clamp(26px, 4vw, 34px);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 0.95;
+    color: #ffc28d;
+  }
+
   .twitter-open-tracker-blocker__media {
     border-radius: 20px;
     overflow: hidden;
@@ -119,9 +152,11 @@ let isBlockModeEnabled = false;
 let isStayHardEnabled = false;
 let isBadgeCountVisible = true;
 let blockedSitesState = normalizeBlockedSites({}, customSitesState);
+let timedBlocksState = normalizeTimedBlocks({}, customSitesState);
 let badgeElement = null;
 let blockerElement = null;
 let isSurfaceMountScheduled = false;
+let blockRefreshTimeoutId = null;
 
 function isExtensionContextInvalidatedError(error) {
   if (!error || typeof error !== "object") {
@@ -219,6 +254,7 @@ async function safeRuntimeMessage(message) {
 function refreshTrackedSitesState() {
   trackedSiteMapState = getTrackedSiteMap(customSitesState);
   blockedSitesState = normalizeBlockedSites(blockedSitesState, customSitesState);
+  timedBlocksState = normalizeTimedBlocks(timedBlocksState, customSitesState);
 }
 
 function getCurrentSiteId() {
@@ -254,6 +290,61 @@ function formatMinutesSaved(minutes) {
   }
 
   return `${hours} hour${hours === 1 ? "" : "s"} ${remainder} min`;
+}
+
+function formatTimerRemaining(remainingMinutes) {
+  if (remainingMinutes < 60) {
+    return `${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"}`;
+  }
+
+  const hours = Math.floor(remainingMinutes / 60);
+  const remainder = remainingMinutes % 60;
+
+  if (remainder === 0) {
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+
+  return `${hours} hour${hours === 1 ? "" : "s"} ${remainder} min`;
+}
+
+function formatTimerCountdown(expiresAt) {
+  const totalSeconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function clearBlockRefreshTimer() {
+  if (blockRefreshTimeoutId !== null) {
+    window.clearTimeout(blockRefreshTimeoutId);
+    blockRefreshTimeoutId = null;
+  }
+}
+
+function scheduleBlockRefresh(blockState) {
+  clearBlockRefreshTimer();
+
+  if (!blockState?.timedBlockExpiresAt) {
+    return;
+  }
+
+  const millisecondsUntilExpiry = Math.max(0, blockState.timedBlockExpiresAt - Date.now());
+  const millisecondsUntilNextSecond = Math.max(100, (millisecondsUntilExpiry % 1000) || 1000);
+  const delay = Math.max(
+    100,
+    Math.min(millisecondsUntilExpiry + 50, millisecondsUntilNextSecond + 50)
+  );
+
+  blockRefreshTimeoutId = window.setTimeout(() => {
+    blockRefreshTimeoutId = null;
+    renderSurface();
+  }, delay);
 }
 
 function ensureBadge() {
@@ -293,6 +384,10 @@ function ensureBlocker() {
       </div>
       <h1 class="twitter-open-tracker-blocker__title"></h1>
       <p class="twitter-open-tracker-blocker__copy"></p>
+      <div class="twitter-open-tracker-blocker__timer" hidden>
+        <span class="twitter-open-tracker-blocker__timer-label">Timer Remaining</span>
+        <span class="twitter-open-tracker-blocker__timer-value"></span>
+      </div>
       <p class="twitter-open-tracker-blocker__count"></p>
       <p class="twitter-open-tracker-blocker__saved"></p>
       <button class="twitter-open-tracker-blocker__button" type="button">Open stay hard controls</button>
@@ -401,32 +496,70 @@ function renderCount(count) {
 function renderBlocker() {
   const siteId = getCurrentSiteId();
   const siteLabel = siteId ? (trackedSiteMapState[siteId]?.label ?? "This site") : "This site";
+  const blockState = getSiteBlockState(siteId, {
+    isBlockModeEnabled,
+    blockedSites: blockedSitesState,
+    timedBlocks: timedBlocksState
+  });
   const eyebrow = getBlockerShadowElement(".twitter-open-tracker-blocker__eyebrow");
   const media = getBlockerShadowElement(".twitter-open-tracker-blocker__media");
   const title = getBlockerShadowElement(".twitter-open-tracker-blocker__title");
   const copy = getBlockerShadowElement(".twitter-open-tracker-blocker__copy");
+  const timerElement = getBlockerShadowElement(".twitter-open-tracker-blocker__timer");
+  const timerValueElement = getBlockerShadowElement(".twitter-open-tracker-blocker__timer-value");
   const countElement = getBlockerShadowElement(".twitter-open-tracker-blocker__count");
   const savedElement = getBlockerShadowElement(".twitter-open-tracker-blocker__saved");
   const blockedTodayCount = getTodayBlockedCount(cachedDailyCounts, siteId);
   const savedTodayMinutes = getTodaySavedMinutes(cachedDailyCounts, siteId);
 
-  if (!eyebrow || !media || !title || !copy || !countElement || !savedElement) {
+  if (
+    !eyebrow ||
+    !media ||
+    !title ||
+    !copy ||
+    !timerElement ||
+    !timerValueElement ||
+    !countElement ||
+    !savedElement
+  ) {
     return;
   }
 
-  eyebrow.textContent = isStayHardEnabled ? "Stay hard mode" : "Block mode on";
-  media.hidden = !isStayHardEnabled;
-  title.textContent = isStayHardEnabled ? "Stay hard." : `${siteLabel} is blocked`;
-  copy.textContent = isStayHardEnabled
-    ? `You tried to open ${siteLabel}. Close the tab, keep moving, and come back only if it still matters.`
-    : `Stay Hard is hiding ${siteLabel} until you switch that site's blocker off.`;
-  countElement.textContent = `You tried to open this blocked page ${blockedTodayCount} time${blockedTodayCount === 1 ? "" : "s"} today.`;
-  savedElement.textContent = `We saved you about ${formatMinutesSaved(savedTodayMinutes)} from blocked opens today.`;
-}
+  const timerCopy = formatTimerRemaining(blockState.remainingMinutes);
+  const timerCountdown =
+    blockState.reason === "timer" && blockState.timedBlockExpiresAt
+      ? formatTimerCountdown(blockState.timedBlockExpiresAt)
+      : "";
 
-function isCurrentSiteBlocked() {
-  const currentSiteId = getCurrentSiteId();
-  return currentSiteId !== null && isBlockModeEnabled && blockedSitesState[currentSiteId] === true;
+  eyebrow.textContent =
+    blockState.reason === "timer"
+      ? (isStayHardEnabled ? "Stay hard timer" : "Focus timer on")
+      : (isStayHardEnabled ? "Stay hard mode" : "Block mode on");
+  media.hidden = !isStayHardEnabled;
+  title.textContent =
+    blockState.reason === "timer"
+      ? (isStayHardEnabled ? "Stay hard." : `${siteLabel} is blocked for now`)
+      : (isStayHardEnabled ? "Stay hard." : `${siteLabel} is blocked`);
+  copy.textContent =
+    blockState.reason === "timer"
+      ? (
+          isStayHardEnabled
+            ? `You set a focus timer on ${siteLabel}. Close the tab and keep moving.`
+            : `${siteLabel} is in a focus block right now.`
+        )
+      : (
+          isStayHardEnabled
+            ? `You tried to open ${siteLabel}. Close the tab, keep moving, and come back only if it still matters.`
+            : `Stay Hard is hiding ${siteLabel} until you switch that site's blocker off.`
+        );
+  timerElement.hidden = blockState.reason !== "timer";
+  timerValueElement.textContent = timerCountdown;
+  countElement.textContent =
+    blockState.reason === "timer"
+      ? `You've hit this focus block ${blockedTodayCount} time${blockedTodayCount === 1 ? "" : "s"} today and saved about ${formatMinutesSaved(savedTodayMinutes)}.`
+      : `You tried to open this blocked page ${blockedTodayCount} time${blockedTodayCount === 1 ? "" : "s"} today and saved about ${formatMinutesSaved(savedTodayMinutes)}.`;
+  savedElement.hidden = true;
+  savedElement.textContent = "";
 }
 
 function renderSurface() {
@@ -439,13 +572,20 @@ function renderSurface() {
     return;
   }
 
-  const shouldShowBlocker = isCurrentSiteBlocked();
+  const blockState = getSiteBlockState(getCurrentSiteId(), {
+    isBlockModeEnabled,
+    blockedSites: blockedSitesState,
+    timedBlocks: timedBlocksState
+  });
+  const shouldShowBlocker = blockState.isBlocked;
 
   if (shouldShowBlocker) {
     renderBlocker();
   } else {
     renderCount(currentBadgeCount);
   }
+
+  scheduleBlockRefresh(blockState);
 
   badge.hidden = shouldShowBlocker;
   blocker.hidden = !shouldShowBlocker;
@@ -463,12 +603,14 @@ async function initializeBadge() {
     BLOCKED_SITES_KEY,
     BADGE_COUNT_VISIBLE_KEY,
     CUSTOM_SITES_KEY,
-    STAY_HARD_ENABLED_KEY
+    STAY_HARD_ENABLED_KEY,
+    TIMED_BLOCKS_KEY
   ]);
   ensureBadge();
 
   customSitesState = normalizeCustomSites(storedValues[CUSTOM_SITES_KEY]);
   blockedSitesState = normalizeBlockedSites(storedValues[BLOCKED_SITES_KEY], customSitesState);
+  timedBlocksState = normalizeTimedBlocks(storedValues[TIMED_BLOCKS_KEY], customSitesState);
   refreshTrackedSitesState();
   cachedDailyCounts = getNormalizedDailyCounts(storedValues[DAILY_COUNTS_KEY]);
   currentBadgeCount = getBadgeCount(cachedDailyCounts, getCurrentSiteId());
@@ -500,6 +642,10 @@ if (hasLiveExtensionContext()) {
 
     if (changes[BLOCKED_SITES_KEY]) {
       blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue, customSitesState);
+    }
+
+    if (changes[TIMED_BLOCKS_KEY]) {
+      timedBlocksState = normalizeTimedBlocks(changes[TIMED_BLOCKS_KEY].newValue, customSitesState);
     }
 
     if (changes[BADGE_COUNT_VISIBLE_KEY]) {

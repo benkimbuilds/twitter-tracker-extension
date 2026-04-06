@@ -21,11 +21,17 @@ let isStayHardEnabled = false;
 let isBadgeCountVisible = true;
 let blockedOpenMinutesState = DEFAULT_BLOCKED_OPEN_MINUTES;
 let blockedSitesState = normalizeBlockedSites({}, customSitesState);
+let timedBlocksState = normalizeTimedBlocks({}, customSitesState);
+let historyExcludedSitesState = normalizeHistoryExcludedSites({}, customSitesState);
+let siteBlockTimerMinutesState = DEFAULT_BLOCK_TIMER_MINUTES;
+let popupTimerRefreshId = null;
 
 function refreshTrackedSitesState() {
   trackedSitesState = getTrackedSites(customSitesState);
   trackedSiteMapState = getTrackedSiteMap(customSitesState);
   blockedSitesState = normalizeBlockedSites(blockedSitesState, customSitesState);
+  timedBlocksState = normalizeTimedBlocks(timedBlocksState, customSitesState);
+  historyExcludedSitesState = normalizeHistoryExcludedSites(historyExcludedSitesState, customSitesState);
 
   if (!currentSiteId || !(currentSiteId in trackedSiteMapState)) {
     currentSiteId = getFallbackSiteId(customSitesState);
@@ -64,6 +70,51 @@ function formatMinutesSaved(minutes) {
   }
 
   return `${hours}h ${remainder}m`;
+}
+
+function formatRemainingMinutes(remainingMinutes) {
+  if (remainingMinutes < 60) {
+    return `${remainingMinutes}m`;
+  }
+
+  const hours = Math.floor(remainingMinutes / 60);
+  const remainder = remainingMinutes % 60;
+
+  if (remainder === 0) {
+    return `${hours}h`;
+  }
+
+  return `${hours}h ${remainder}m`;
+}
+
+function clearPopupTimerRefresh() {
+  if (popupTimerRefreshId !== null) {
+    window.clearTimeout(popupTimerRefreshId);
+    popupTimerRefreshId = null;
+  }
+}
+
+function schedulePopupTimerRefresh() {
+  clearPopupTimerRefresh();
+
+  const nextExpiry = Object.values(timedBlocksState).reduce((soonest, expiresAt) => {
+    if (!Number.isFinite(expiresAt)) {
+      return soonest;
+    }
+
+    return soonest === null ? expiresAt : Math.min(soonest, expiresAt);
+  }, null);
+
+  if (!Number.isFinite(nextExpiry)) {
+    return;
+  }
+
+  const delay = Math.max(250, nextExpiry - Date.now() + 250);
+  popupTimerRefreshId = window.setTimeout(() => {
+    popupTimerRefreshId = null;
+    timedBlocksState = normalizeTimedBlocks(timedBlocksState, customSitesState);
+    renderPopup();
+  }, delay);
 }
 
 function getNormalizedDayEntry(entry) {
@@ -194,21 +245,42 @@ function appendSvgElement(parent, tagName, attributes) {
   return element;
 }
 
+function getNiceChartScale(rawMaxValue, segments = 4) {
+  const safeMaxValue = Math.max(1, rawMaxValue);
+  const roughStep = (safeMaxValue * 1.15) / segments;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalized = roughStep / magnitude;
+
+  let niceStep = 1;
+  if (normalized > 5) {
+    niceStep = 10;
+  } else if (normalized > 2) {
+    niceStep = 5;
+  } else if (normalized > 1) {
+    niceStep = 2;
+  }
+
+  const step = niceStep * magnitude;
+  return {
+    maxValue: step * segments,
+    step
+  };
+}
+
 function renderChart(dailyCounts, siteId) {
   const chart = clearChart();
   const data = getChartData(dailyCounts, siteId);
   const values = data.flatMap((entry) => [entry.count, entry.blockedCount]);
-  const maxValue = Math.max(...values, 1);
+  const { maxValue, step } = getNiceChartScale(Math.max(...values, 1));
   const width = 320;
   const height = 180;
   const padding = { top: 18, right: 34, bottom: 20, left: 12 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
-  const yAxisTicks = Array.from({ length: 4 }, (_, index) => {
-    const ratio = 1 - index / 3;
+  const yAxisTicks = Array.from({ length: 5 }, (_, index) => {
     return {
-      value: Math.round(maxValue * ratio),
-      y: padding.top + (innerHeight / 3) * index
+      value: step * (4 - index),
+      y: padding.top + (innerHeight / 4) * index
     };
   });
 
@@ -367,6 +439,56 @@ async function handleBlockedSiteToggle(siteId, nextValue) {
   await chrome.storage.local.set({ [BLOCKED_SITES_KEY]: nextBlockedSites });
 }
 
+async function handleHistoryExcludedToggle(siteId, nextValue) {
+  if (!siteId || !(siteId in trackedSiteMapState)) {
+    return;
+  }
+
+  const nextHistoryExcludedSites = normalizeHistoryExcludedSites(
+    {
+      ...historyExcludedSitesState,
+      [siteId]: nextValue
+    },
+    customSitesState
+  );
+
+  await chrome.storage.local.set({ [HISTORY_EXCLUDED_SITES_KEY]: nextHistoryExcludedSites });
+}
+
+async function startSiteBlockTimer() {
+  if (!currentSiteId || !(currentSiteId in trackedSiteMapState)) {
+    return;
+  }
+
+  const timerInput = document.getElementById("siteBlockTimerInput");
+  const nextMinutes = normalizeBlockTimerMinutes(Number(timerInput?.value));
+  const nextTimedBlocks = normalizeTimedBlocks(
+    {
+      ...timedBlocksState,
+      [currentSiteId]: Date.now() + nextMinutes * 60000
+    },
+    customSitesState
+  );
+
+  siteBlockTimerMinutesState = nextMinutes;
+  if (timerInput) {
+    timerInput.value = String(nextMinutes);
+  }
+  await chrome.storage.local.set({ [TIMED_BLOCKS_KEY]: nextTimedBlocks });
+}
+
+async function clearSiteBlockTimer() {
+  if (!currentSiteId || !(currentSiteId in trackedSiteMapState)) {
+    return;
+  }
+
+  const nextTimedBlocks = { ...timedBlocksState };
+  delete nextTimedBlocks[currentSiteId];
+  await chrome.storage.local.set({
+    [TIMED_BLOCKS_KEY]: normalizeTimedBlocks(nextTimedBlocks, customSitesState)
+  });
+}
+
 async function removeCustomSite(siteId) {
   const site = trackedSiteMapState[siteId];
   if (!site?.isCustom) {
@@ -375,8 +497,14 @@ async function removeCustomSite(siteId) {
 
   const nextCustomSites = customSitesState.filter((customSite) => customSite.id !== siteId);
   const nextBlockedSitesBase = { ...blockedSitesState };
+  const nextTimedBlocksBase = { ...timedBlocksState };
+  const nextHistoryExcludedSitesBase = { ...historyExcludedSitesState };
   delete nextBlockedSitesBase[siteId];
+  delete nextTimedBlocksBase[siteId];
+  delete nextHistoryExcludedSitesBase[siteId];
   const nextBlockedSites = normalizeBlockedSites(nextBlockedSitesBase, nextCustomSites);
+  const nextTimedBlocks = normalizeTimedBlocks(nextTimedBlocksBase, nextCustomSites);
+  const nextHistoryExcludedSites = normalizeHistoryExcludedSites(nextHistoryExcludedSitesBase, nextCustomSites);
   const nextDailyCounts = removeSiteFromDailyCounts(cachedDailyCounts, siteId);
   const nextPopupSiteId =
     currentSiteId === siteId ? getFallbackSiteId(nextCustomSites) : currentSiteId;
@@ -384,6 +512,8 @@ async function removeCustomSite(siteId) {
   await chrome.storage.local.set({
     [CUSTOM_SITES_KEY]: nextCustomSites,
     [BLOCKED_SITES_KEY]: nextBlockedSites,
+    [TIMED_BLOCKS_KEY]: nextTimedBlocks,
+    [HISTORY_EXCLUDED_SITES_KEY]: nextHistoryExcludedSites,
     [DAILY_COUNTS_KEY]: nextDailyCounts,
     [POPUP_SITE_KEY]: nextPopupSiteId
   });
@@ -396,6 +526,11 @@ function renderBlockedSites() {
   list.textContent = "";
 
   trackedSitesState.forEach((site) => {
+    const blockState = getSiteBlockState(site.id, {
+      isBlockModeEnabled,
+      blockedSites: blockedSitesState,
+      timedBlocks: timedBlocksState
+    });
     const row = document.createElement("div");
     row.className = "blocked-site-row";
 
@@ -408,17 +543,35 @@ function renderBlockedSites() {
 
     const hint = document.createElement("p");
     hint.className = "blocked-site-hint";
-    hint.textContent = site.isCustom
-      ? `${site.domains[0]}${blockedSitesState[site.id] ? " • blocked when master mode is on" : " • allowed through"}`
-      : `${site.domains.join(", ")}${blockedSitesState[site.id] ? " • blocked when master mode is on" : " • allowed through"}`;
+    const hintParts = [
+      site.isCustom ? site.domains[0] : site.domains.join(", "),
+      blockedSitesState[site.id] ? "master block armed" : "master block skipped"
+    ];
+
+    if (blockState.reason === "timer") {
+      hintParts.push(`timer ${formatRemainingMinutes(blockState.remainingMinutes)} left`);
+    }
+
+    if (historyExcludedSitesState[site.id] === true) {
+      hintParts.push("browser history off");
+    }
+
+    hint.textContent = hintParts.join(" • ");
 
     copy.append(title, hint);
 
     const actions = document.createElement("div");
     actions.className = "blocked-site-actions";
 
+    const toggles = document.createElement("div");
+    toggles.className = "blocked-site-toggles";
+
     const toggleLabel = document.createElement("label");
-    toggleLabel.className = "toggle";
+    toggleLabel.className = "toggle blocked-site-toggle";
+
+    const toggleLabelText = document.createElement("span");
+    toggleLabelText.className = "blocked-site-toggle-label";
+    toggleLabelText.textContent = "Block";
 
     const toggleInput = document.createElement("input");
     toggleInput.type = "checkbox";
@@ -430,14 +583,46 @@ function renderBlockedSites() {
 
     const toggleCopy = document.createElement("span");
     toggleCopy.className = "toggle-copy";
-    toggleCopy.textContent = blockedSitesState[site.id] ? "Blocked" : "Allowed";
+    toggleCopy.textContent = blockedSitesState[site.id] ? "On" : "Off";
 
     toggleInput.addEventListener("change", async (event) => {
       await handleBlockedSiteToggle(site.id, event.target.checked);
     });
 
-    toggleLabel.append(toggleInput, toggleTrack, toggleCopy);
-    actions.appendChild(toggleLabel);
+    toggleLabel.append(toggleLabelText, toggleInput, toggleTrack, toggleCopy);
+    toggles.appendChild(toggleLabel);
+
+    const historyToggleLabel = document.createElement("label");
+    historyToggleLabel.className = "toggle blocked-site-toggle";
+
+    const historyToggleLabelText = document.createElement("span");
+    historyToggleLabelText.className = "blocked-site-toggle-label";
+    historyToggleLabelText.textContent = "History";
+
+    const historyToggleInput = document.createElement("input");
+    historyToggleInput.type = "checkbox";
+    historyToggleInput.checked = historyExcludedSitesState[site.id] === true;
+
+    const historyToggleTrack = document.createElement("span");
+    historyToggleTrack.className = "toggle-track";
+    historyToggleTrack.setAttribute("aria-hidden", "true");
+
+    const historyToggleCopy = document.createElement("span");
+    historyToggleCopy.className = "toggle-copy";
+    historyToggleCopy.textContent = historyToggleInput.checked ? "Off" : "On";
+
+    historyToggleInput.addEventListener("change", async (event) => {
+      await handleHistoryExcludedToggle(site.id, event.target.checked);
+    });
+
+    historyToggleLabel.append(
+      historyToggleLabelText,
+      historyToggleInput,
+      historyToggleTrack,
+      historyToggleCopy
+    );
+    toggles.appendChild(historyToggleLabel);
+    actions.appendChild(toggles);
 
     if (site.isCustom) {
       const removeButton = document.createElement("button");
@@ -465,11 +650,18 @@ function renderPopup() {
   document.getElementById("blockedOpenMinutesInput").value = String(blockedOpenMinutesState);
   document.getElementById("badgeCountToggle").checked = isBadgeCountVisible;
   document.getElementById("badgeCountToggleCopy").textContent = isBadgeCountVisible ? "On" : "Off";
+  document.getElementById("siteBlockTimerInput").value = String(siteBlockTimerMinutesState);
 
   const site = trackedSiteMapState[currentSiteId];
   if (!site) {
     return;
   }
+
+  const siteBlockState = getSiteBlockState(currentSiteId, {
+    isBlockModeEnabled,
+    blockedSites: blockedSitesState,
+    timedBlocks: timedBlocksState
+  });
 
   const todayKey = getTodayKey();
   const siteOpensToday = getSiteCountForDate(cachedDailyCounts, todayKey, currentSiteId);
@@ -490,7 +682,21 @@ function renderPopup() {
   document
     .getElementById("historyChart")
     .setAttribute("aria-label", `Line chart of daily ${site.label} opens and blocked visits`);
+  document.getElementById("siteControlsCopy").textContent =
+    `Temporary block controls for ${site.label}.`;
+  document.getElementById("siteTimerStatus").textContent =
+    siteBlockState.reason === "timer"
+      ? `${formatRemainingMinutes(siteBlockState.remainingMinutes)} left`
+      : (
+          siteBlockState.reason === "mode"
+            ? "Blocked by master mode"
+            : "No timer active"
+        );
+  document.getElementById("startSiteBlockTimerButton").textContent =
+    siteBlockState.reason === "timer" ? "Extend" : "Start";
+  document.getElementById("clearSiteBlockTimerButton").hidden = siteBlockState.reason !== "timer";
   renderChart(cachedDailyCounts, currentSiteId);
+  schedulePopupTimerRefresh();
 }
 
 async function resetToday() {
@@ -549,6 +755,8 @@ async function addCustomSiteFromForm(event) {
   await chrome.storage.local.set({
     [CUSTOM_SITES_KEY]: nextCustomSites,
     [BLOCKED_SITES_KEY]: nextBlockedSites,
+    [HISTORY_EXCLUDED_SITES_KEY]: normalizeHistoryExcludedSites(historyExcludedSitesState, nextCustomSites),
+    [TIMED_BLOCKS_KEY]: normalizeTimedBlocks(timedBlocksState, nextCustomSites),
     [POPUP_SITE_KEY]: site.id
   });
 
@@ -565,11 +773,15 @@ async function initializePopup() {
     BADGE_COUNT_VISIBLE_KEY,
     CUSTOM_SITES_KEY,
     STAY_HARD_ENABLED_KEY,
-    BLOCKED_OPEN_MINUTES_KEY
+    BLOCKED_OPEN_MINUTES_KEY,
+    TIMED_BLOCKS_KEY,
+    HISTORY_EXCLUDED_SITES_KEY
   ]);
 
   customSitesState = normalizeCustomSites(stored[CUSTOM_SITES_KEY]);
   blockedSitesState = normalizeBlockedSites(stored[BLOCKED_SITES_KEY], customSitesState);
+  timedBlocksState = normalizeTimedBlocks(stored[TIMED_BLOCKS_KEY], customSitesState);
+  historyExcludedSitesState = normalizeHistoryExcludedSites(stored[HISTORY_EXCLUDED_SITES_KEY], customSitesState);
   refreshTrackedSitesState();
   cachedDailyCounts = getNormalizedDailyCounts(stored[DAILY_COUNTS_KEY]);
   isBlockModeEnabled = stored[BLOCK_MODE_KEY] === true;
@@ -600,6 +812,13 @@ document.getElementById("blockedOpenMinutesInput").addEventListener("change", as
   event.target.value = String(nextValue);
   await chrome.storage.local.set({ [BLOCKED_OPEN_MINUTES_KEY]: nextValue });
 });
+document.getElementById("siteBlockTimerInput").addEventListener("change", (event) => {
+  const nextValue = normalizeBlockTimerMinutes(Number(event.target.value));
+  siteBlockTimerMinutesState = nextValue;
+  event.target.value = String(nextValue);
+});
+document.getElementById("startSiteBlockTimerButton").addEventListener("click", startSiteBlockTimer);
+document.getElementById("clearSiteBlockTimerButton").addEventListener("click", clearSiteBlockTimer);
 document.getElementById("badgeCountToggle").addEventListener("change", async (event) => {
   await chrome.storage.local.set({ [BADGE_COUNT_VISIBLE_KEY]: event.target.checked });
 });
@@ -615,6 +834,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[BLOCKED_SITES_KEY]) {
     blockedSitesState = normalizeBlockedSites(changes[BLOCKED_SITES_KEY].newValue, customSitesState);
+  }
+
+  if (changes[TIMED_BLOCKS_KEY]) {
+    timedBlocksState = normalizeTimedBlocks(changes[TIMED_BLOCKS_KEY].newValue, customSitesState);
+  }
+
+  if (changes[HISTORY_EXCLUDED_SITES_KEY]) {
+    historyExcludedSitesState = normalizeHistoryExcludedSites(
+      changes[HISTORY_EXCLUDED_SITES_KEY].newValue,
+      customSitesState
+    );
   }
 
   if (changes[DAILY_COUNTS_KEY]) {

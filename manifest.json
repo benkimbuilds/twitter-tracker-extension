@@ -6,6 +6,7 @@
   "permissions": [
     "storage",
     "tabs",
+    "history",
     "webNavigation"
   ],
   "host_permissions": [

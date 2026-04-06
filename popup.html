@@ -93,6 +93,34 @@
           </div>
         </section>
       </section>
+      <section class="site-controls-card" aria-labelledby="siteControlsTitle">
+        <div class="site-controls-header">
+          <div>
+            <p class="metric-label">Selected Site</p>
+            <h2 id="siteControlsTitle">Focus timer</h2>
+          </div>
+          <p id="siteControlsCopy" class="label site-controls-copy">Temporary block controls for the current site.</p>
+        </div>
+        <section class="site-control-panel">
+          <div class="site-control-top">
+            <div class="site-control-copy">
+              <p class="metric-label">Timer Block</p>
+              <h3 class="site-control-title">Lock this site for a while</h3>
+            </div>
+            <p id="siteTimerStatus" class="site-timer-status-pill">No timer is active.</p>
+          </div>
+          <div class="site-control-actions">
+            <label class="minutes-field" for="siteBlockTimerInput">
+              <span class="minutes-field-label">Block for minutes</span>
+              <input id="siteBlockTimerInput" type="number" min="1" max="1440" step="1">
+            </label>
+            <div class="site-timer-buttons">
+              <button id="startSiteBlockTimerButton" type="button">Start timer</button>
+              <button id="clearSiteBlockTimerButton" class="secondary-button" type="button">Clear timer</button>
+            </div>
+          </div>
+        </section>
+      </section>
       <section class="add-site-card" aria-labelledby="addSiteTitle">
         <div class="add-site-header">
           <div>
